@@ -1,0 +1,21 @@
+{
+  "name": "willemilks-water-editor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A modern, browser-based level editor for Where's My Water? — terrain painting, object editing, paths and more.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["wheres-my-water", "level-editor", "modding", "wmw"],
+  "author": "Willemilk",
+  "license": "MIT",
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  }
+}
