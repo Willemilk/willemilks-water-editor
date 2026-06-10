@@ -162,7 +162,8 @@ export class Terrain {
    *  painted rock merges seamlessly with rock that was already there.
    *  Rule (measured on the original levels): the top 2 pixels of any exposed
    *  rock surface are Rock Highlight; rim pixels that get buried turn back
-   *  into Rock. Hand-placed Rock Shadow (deep rock) is left untouched. */
+   *  into Rock. Hand-placed Rock Shadow (deep rock) is left untouched.
+   *  Off-map counts as solid so border rock keeps no rim, like the originals. */
   smartRockPass(x0, y0, x1, y1, rockRgb, highlightRgb, familyRgbs) {
     const xa = Math.max(0, Math.min(x0, x1) - 2);
     const xb = Math.min(this.width - 1, Math.max(x0, x1) + 2);
@@ -187,6 +188,22 @@ export class Terrain {
           this.setPixel(x, y, highlightRgb); // exposed rim
         } else if (key === hiKey) {
           this.setPixel(x, y, rockRgb); // buried rim turns into body
+        }
+      }
+    }
+  }
+
+  /** Replace one exact color with another, but only inside a rect (smart dirt). */
+  normalizeColorInRect(x0, y0, x1, y1, fromRgb, toRgb) {
+    const xa = Math.max(0, Math.min(x0, x1));
+    const xb = Math.min(this.width - 1, Math.max(x0, x1));
+    const ya = Math.max(0, Math.min(y0, y1));
+    const yb = Math.min(this.height - 1, Math.max(y0, y1));
+    for (let y = ya; y <= yb; y++) {
+      for (let x = xa; x <= xb; x++) {
+        const o = (y * this.width + x) * 4;
+        if (this.data[o] === fromRgb[0] && this.data[o + 1] === fromRgb[1] && this.data[o + 2] === fromRgb[2]) {
+          this.data[o] = toRgb[0]; this.data[o + 1] = toRgb[1]; this.data[o + 2] = toRgb[2];
         }
       }
     }

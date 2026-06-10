@@ -9,6 +9,8 @@ import { Editor, TOOLS } from './ui/editor.js';
 import { LevelBrowser, ObjectBrowser, Inspector, materialPalette, propertySuggestions, el } from './ui/panels.js';
 import { startTutorial, shouldShowTutorial, toast } from './ui/tutorial.js';
 import { DEFAULT_LEVEL_WIDTH, DEFAULT_LEVEL_HEIGHT } from './data/materials.js';
+import { rebuildApk } from './core/apk.js';
+import { t, getPref, setPref, setLang, currentLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
 
@@ -27,37 +29,83 @@ function renderWelcome(error = '') {
   app.replaceChildren(
     el('div', { class: 'welcome' },
       el('div', { class: 'welcome-card', id: 'dropzone' },
-        el('div', { class: 'logo' }, el('span', { class: 'logo-drop' }, '💧'), el('h1', { text: 'Willemilks Water Editor' })),
-        el('p', { class: 'tagline', text: 'The Where\'s My Water level editor that can do it all: objects, properties, motor paths and full terrain painting.' }),
-        el('div', { class: 'drop-area' },
-          el('p', { html: '<strong>Drop your game files here</strong>' }),
-          el('p', { class: 'muted', text: 'Accepts: a .zip with the assets folder, a zip containing base.apk, or the .apk itself. Nothing leaves your browser.' }),
-          el('div', { class: 'row gap center' },
-            el('button', { class: 'btn primary', text: 'Choose zip / apk…', onclick: () => fileInput.click() }),
-            el('button', { class: 'btn', text: 'Choose folder…', onclick: () => folderInput.click() })
-          )
+        el('div', { class: 'logo' }, logoSvg(42), el('h1', { text: 'Willemilks Water Editor' })),
+        el('p', { class: 'tagline', text: t('welcome.tagline') }),
+        el('label', { class: 'drop-area', id: 'drop-label' },
+          dropIcon(),
+          el('p', { class: 'drop-title', text: t('welcome.dropTitle') }),
+          el('p', { class: 'muted small', text: t('welcome.dropSub') })
+        ),
+        el('div', { class: 'welcome-actions' },
+          el('button', { class: 'btn primary', text: t('welcome.chooseZip'), onclick: () => fileInput.click() }),
+          el('button', { class: 'btn', text: t('welcome.chooseFolder'), onclick: () => folderInput.click() }),
+          window.native?.isApp && getPref('lastGamePath')
+            ? el('button', { class: 'btn', text: t('welcome.reopenLast'), onclick: openRecentGame })
+            : null
         ),
         error ? el('p', { class: 'error', text: error }) : null,
-        el('p', { class: 'muted small', text: 'Tip: pull base.apk from your device (it is a zip), or drop the same zip you use for your mod workflow.' })
+        el('div', { class: 'welcome-foot' },
+          el('p', { class: 'muted small', text: t('welcome.tip') }),
+          el('button', { class: 'btn ghost small', text: t('settings.title'), onclick: showSettings })
+        )
       )
     )
   );
 
-  const fileInput = el('input', { type: 'file', accept: '.zip,.apk', style: 'display:none' });
+  const fileInput = el('input', { type: 'file', accept: '.zip,.apk,.xapk', style: 'display:none' });
   const folderInput = el('input', { type: 'file', webkitdirectory: '', style: 'display:none' });
   app.append(fileInput, folderInput);
-  fileInput.addEventListener('change', () => fileInput.files[0] && ingest(() => loadFromZipFile(fileInput.files[0], setBusy)));
+  fileInput.addEventListener('change', () => fileInput.files[0] && ingestFromFile(fileInput.files[0]));
   folderInput.addEventListener('change', () => folderInput.files.length && ingest(() => loadFromFolder(folderInput.files, setBusy)));
 
   const dz = document.getElementById('dropzone');
-  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  const label = document.getElementById('drop-label');
+  ['dragenter', 'dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); label.classList.add('drag'); }));
+  dz.addEventListener('dragleave', (e) => { if (!dz.contains(e.relatedTarget)) label.classList.remove('drag'); });
   dz.addEventListener('drop', (e) => {
     e.preventDefault();
-    dz.classList.remove('drag');
+    label.classList.remove('drag');
     const f = e.dataTransfer.files[0];
-    if (f) ingest(() => loadFromZipFile(f, setBusy));
+    if (f) ingestFromFile(f);
   });
+}
+
+/** Single entry for zip/apk files; remembers the path in the app for reopening. */
+function ingestFromFile(f) {
+  if (window.native?.isApp && f.path) setPref('lastGamePath', f.path);
+  ingest(() => loadFromZipFile(f, setBusy));
+}
+
+async function openRecentGame() {
+  const p = getPref('lastGamePath');
+  if (!p) return toast(t('toast.noRecent'), 'err');
+  try {
+    const { name, buffer } = await window.native.readFile(p);
+    ingest(() => loadFromZipFile(new File([buffer], name), setBusy));
+  } catch {
+    toast(t('toast.noRecent'), 'err');
+  }
+}
+
+function logoSvg(size) {
+  const span = el('span', { class: 'logo-drop' });
+  span.innerHTML = `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true">
+    <defs><linearGradient id="wd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ec2ff"/><stop offset="1" stop-color="#1f8fe0"/>
+    </linearGradient></defs>
+    <path d="M32 4 C32 4 12 28 12 41 a20 20 0 0 0 40 0 C52 28 32 4 32 4 Z" fill="url(#wd)" stroke="#0d3a5c" stroke-width="2.5"/>
+    <circle cx="24.5" cy="40" r="4.4" fill="#fff"/><circle cx="39.5" cy="40" r="4.4" fill="#fff"/>
+    <circle cx="25.5" cy="41" r="2.1" fill="#10222f"/><circle cx="38.5" cy="41" r="2.1" fill="#10222f"/>
+    <path d="M26 50 q6 4.5 12 0" fill="none" stroke="#0d3a5c" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+  return span;
+}
+
+function dropIcon() {
+  const span = el('span', { class: 'drop-glyph' });
+  span.innerHTML = `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+    <path d="M12 3v12m0 0l-4-4m4 4l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+  return span;
 }
 
 let busyEl = null;
@@ -94,16 +142,20 @@ function renderEditor() {
     el('div', { class: 'shell' },
       // top bar
       el('header', { class: 'topbar' },
-        el('div', { class: 'brand' }, el('span', {}, '💧'), el('strong', { text: 'Willemilks Water Editor' }),
+        el('div', { class: 'brand' }, logoSvg(22), el('strong', { text: 'Willemilks Water Editor' }),
           el('span', { class: 'muted small', id: 'level-title' })),
         el('div', { class: 'row gap', id: 'topbar-actions' },
-          el('button', { class: 'btn', id: 'btn-undo', text: '↶ Undo', title: 'Ctrl+Z', onclick: () => state.editor.doUndo() }),
-          el('button', { class: 'btn', id: 'btn-redo', text: '↷ Redo', title: 'Ctrl+Y', onclick: () => state.editor.doRedo() }),
+          el('button', { class: 'btn', id: 'btn-undo', text: '↶ ' + t('btn.undo'), title: 'Ctrl+Z', onclick: () => state.editor.doUndo() }),
+          el('button', { class: 'btn', id: 'btn-redo', text: '↷ ' + t('btn.redo'), title: 'Ctrl+Y', onclick: () => state.editor.doRedo() }),
           el('span', { class: 'vsep' }),
-          el('button', { class: 'btn primary', id: 'btn-save', text: 'Save', title: 'Ctrl+S (saves into the loaded game tree)', onclick: saveCurrent }),
-          el('button', { class: 'btn', id: 'btn-export', text: 'Export ▾', onclick: toggleExportMenu }),
+          el('button', { class: 'btn primary', id: 'btn-save', text: t('btn.save'), title: 'Ctrl+S', onclick: saveCurrent }),
+          el('button', { class: 'btn', id: 'btn-export', text: t('btn.export') + ' ▾', onclick: toggleExportMenu }),
+          window.native?.isApp
+            ? el('button', { class: 'btn', id: 'btn-playtest', text: '▶ ' + t('btn.playtest'), title: 'F5', onclick: runPlaytest })
+            : null,
           el('span', { class: 'vsep' }),
-          el('button', { class: 'btn ghost', title: 'Show tutorial again', text: '?', onclick: startTutorial })
+          el('button', { class: 'btn ghost', title: t('settings.title'), text: '⚙', onclick: showSettings }),
+          el('button', { class: 'btn ghost', title: 'Tutorial', text: '?', onclick: startTutorial })
         )
       ),
       // workspace
@@ -111,8 +163,8 @@ function renderEditor() {
         // left panel with tabs
         el('aside', { class: 'left' },
           el('div', { class: 'tabs' },
-            el('button', { class: 'tab active', id: 'tab-levels', text: 'Levels', onclick: () => switchTab('levels') }),
-            el('button', { class: 'tab', id: 'tab-objects', text: 'Objects', onclick: () => switchTab('objects') })
+            el('button', { class: 'tab active', id: 'tab-levels', text: t('tabs.levels'), onclick: () => switchTab('levels') }),
+            el('button', { class: 'tab', id: 'tab-objects', text: t('tabs.objects'), onclick: () => switchTab('objects') })
           ),
           el('div', { class: 'tab-body', id: 'level-panel' }),
           el('div', { class: 'tab-body hidden', id: 'object-panel' })
@@ -122,28 +174,28 @@ function renderEditor() {
           el('div', { class: 'toolbar' },
             el('div', { class: 'tool-group', id: 'toolbar-tools' }),
             el('div', { class: 'tool-group', id: 'brush-group' },
-              el('span', { class: 'muted small', text: 'Brush' }),
+              el('span', { class: 'muted small', text: t('tool.brush') }),
               el('input', { type: 'range', min: '1', max: '9', step: '2', value: '1', id: 'brush-size',
                 oninput: (e) => { state.editor.brushSize = parseInt(e.target.value); document.getElementById('brush-val').textContent = e.target.value; } }),
               el('span', { class: 'muted small', id: 'brush-val', text: '1' })
             ),
             el('div', { class: 'tool-group' },
-              toggleBtn('Grid', 'btn-grid', (on) => { state.editor.showGrid = on; state.editor.requestRender(); }),
-              toggleBtn('Collision', 'btn-coll', (on) => { state.editor.showCollision = on; state.editor.requestRender(); }),
-              toggleBtn('Paths', 'btn-paths', (on) => { state.editor.showPaths = on; state.editor.requestRender(); }, true),
-              toggleBtn('Smart rock', 'btn-smartrock', (on) => { state.editor.smartRock = on; }, true),
-              el('button', { class: 'btn small', text: 'Fit', title: 'Fit level in view (0)', onclick: () => state.editor.fitView() })
+              toggleBtn(t('toggle.grid'), 'btn-grid', (on) => { state.editor.showGrid = on; state.editor.requestRender(); }),
+              toggleBtn(t('toggle.collision'), 'btn-coll', (on) => { state.editor.showCollision = on; state.editor.requestRender(); }),
+              toggleBtn(t('toggle.paths'), 'btn-paths', (on) => { state.editor.showPaths = on; state.editor.requestRender(); }, true),
+              el('button', { class: 'btn small', text: t('btn.fit'), title: t('btn.fit') + ' (0)', onclick: () => state.editor.fitView() })
             )
           ),
           el('div', { class: 'mat-bar', id: 'material-bar' }),
           el('div', { class: 'canvas-wrap', id: 'canvas-wrap' },
             el('canvas', { id: 'editor-canvas' }),
             el('div', { class: 'canvas-empty', id: 'canvas-empty' },
-              el('p', { text: '← Pick a level to start editing' }),
-              el('button', { class: 'btn', text: '+ New empty level', onclick: newLevel }))
+              el('p', { text: '←' }),
+              el('button', { class: 'btn', text: '+ ' + t('btn.newLevel'), onclick: newLevel }))
           ),
           el('div', { class: 'statusbar', id: 'statusbar' }, el('span', { id: 'status-pos' }), el('span', { id: 'status-mat' }),
-            el('span', { class: 'grow' }), el('span', { class: 'muted small', text: 'Pan with right mouse or hold Space. Scroll to zoom.' }))
+            el('span', { class: 'grow' }), el('span', { class: 'muted small', id: 'status-zoom' }),
+            el('span', { class: 'muted small', text: t('status.pan') }))
         ),
         // right inspector
         el('aside', { class: 'right scroll', id: 'inspector' })
@@ -156,6 +208,10 @@ function renderEditor() {
   const canvas = document.getElementById('editor-canvas');
   state.editor = new Editor(canvas, state.resolver, {
     onSelect: (obj) => { inspector.setObject(obj); },
+    onViewChanged: (zoom) => {
+      const z = document.getElementById('status-zoom');
+      if (z) z.textContent = Math.round(zoom * 100) + '% ' + t('status.zoom');
+    },
     onChange: (kind) => {
       if (kind === 'move') inspector.refreshPosition();
       else inspector.render();
@@ -178,6 +234,8 @@ function renderEditor() {
       toast(`Picked ${m.name}`, 'info', 1500);
     },
   });
+
+  state.editor.smartTerrain = getPref('smartTerrain', true);
 
   const levelBrowser = new LevelBrowser(document.getElementById('level-panel'), openLevel);
   levelBrowser.setLevels(state.levels);
@@ -251,7 +309,12 @@ function pixelLabel(px) {
 function onGlobalKeys(e) {
   if (e.target.matches('input, textarea, select')) return;
   if (e.code === 'Space') { state.editor?.setSpace(true); e.preventDefault(); }
-  if (e.key === 'Escape' && state.placing) { state.placing = null; toast('Placement cancelled', 'info', 1200); }
+  if (e.key === 'Escape') {
+    if (state.placing) { state.placing = null; toast(t('btn.cancel'), 'info', 1000); }
+    else if (state.editor?.selected) { state.editor.selected = null; state.inspector?.setObject(null); state.editor.requestRender(); }
+    document.querySelector('.export-menu')?.remove();
+  }
+  if (e.key === 'F5' && window.native?.isApp) { e.preventDefault(); runPlaytest(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveCurrent(); }
   if (!state.editor || e.ctrlKey || e.metaKey) return;
   const map = { v: TOOLS.SELECT, b: TOOLS.PENCIL, e: TOOLS.ERASER, l: TOOLS.LINE, r: TOOLS.RECT, f: TOOLS.FILL, i: TOOLS.PICKER };
@@ -310,7 +373,7 @@ function toggleBtn(label, id, onToggle, initial = false) {
 }
 
 async function openLevel(entry) {
-  if (state.level?.dirty && !confirm('You have unsaved changes. Open another level anyway?')) return;
+  if (state.level?.dirty && !confirm(t('toast.unsaved', { name: state.level.name }))) return;
   try {
     setBusy(`Opening ${entry.name}…`);
     const xmlText = state.vfs.readText(entry.xmlPath);
@@ -329,6 +392,7 @@ async function openLevel(entry) {
     state.editor.setLevel(level);
     state.inspector.setObject(null);
     updateUndoButtons();
+    setPref('lastLevel', entry.name);
     setBusy(null);
   } catch (err) {
     setBusy(null);
@@ -338,9 +402,18 @@ async function openLevel(entry) {
 }
 
 function newLevel() {
-  const name = prompt('Level name (no spaces, e.g. my_custom_level):', 'my_custom_level');
-  if (!name) return;
-  const clean = name.trim().replace(/\s+/g, '_');
+  modalPrompt(t('new.title'), t('new.name'), 'my_custom_level', (name) => {
+    if (!name) return;
+    const clean = name.trim().replace(/\s+/g, '_');
+    if (state.levels.some((l) => l.name.toLowerCase() === clean.toLowerCase())) {
+      toast(t('new.exists'), 'err');
+      return;
+    }
+    createLevel(clean);
+  });
+}
+
+function createLevel(clean) {
   const level = new Level(clean);
   level.terrain = Terrain.blank(DEFAULT_LEVEL_WIDTH, DEFAULT_LEVEL_HEIGHT);
   level.room = { x: 0, y: -30 };
@@ -349,7 +422,7 @@ function newLevel() {
   document.getElementById('level-title').textContent = '· ' + clean + ' (new)';
   state.editor.setLevel(level);
   state.inspector.setObject(null);
-  toast('New level created. Paint terrain and add a spout + drain to make it playable.', 'ok', 5000);
+  toast(t('toast.saved', { name: clean }).replace('…', ''), 'ok', 2500);
 }
 
 function markDirty() {
@@ -372,23 +445,23 @@ function saveCurrent() {
     state.levelBrowser.setActive(state.level.name);
   }
   document.getElementById('level-title').textContent = '· ' + state.level.name;
-  toast('Saved into the loaded game tree. Use Export to get the files out.', 'ok');
+  toast(t('toast.saved', { name: state.level.name }), 'ok');
 }
 
 function exportLevelZip() {
-  if (!state.level) return toast('Open a level first', 'err');
+  if (!state.level) return toast(t('toast.openFirst'), 'err');
   downloadLevelZip(state.level);
 }
 function exportXml() {
-  if (!state.level) return toast('Open a level first', 'err');
+  if (!state.level) return toast(t('toast.openFirst'), 'err');
   downloadBytes(levelToFiles(state.level).xml, state.level.name + '.xml', 'text/xml');
 }
 function exportPng() {
-  if (!state.level) return toast('Open a level first', 'err');
+  if (!state.level) return toast(t('toast.openFirst'), 'err');
   downloadBytes(levelToFiles(state.level).png, state.level.name + '.png', 'image/png');
 }
 function exportAssets() {
-  if (!state.vfs) return toast('Load game files first', 'err');
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
   setBusy('Packing assets…');
   setTimeout(() => { try { downloadAssetsZip(state.vfs, setBusy); } finally { setBusy(null); } }, 50);
 }
@@ -396,10 +469,10 @@ function exportAssets() {
 function toggleExportMenu(e) {
   document.querySelector('.export-menu')?.remove();
   const menu = el('div', { class: 'export-menu' },
-    menuItem('Level files (.xml + .png zip)', 'For dropping into assets/Levels in your APK.', exportLevelZip),
-    menuItem('Level .xml only', '', exportXml),
-    menuItem('Level .png only', 'Indexed 8-bit, game-compatible.', exportPng),
-    menuItem('Whole assets tree (.zip)', 'Everything loaded, including your saved edits.', exportAssets)
+    menuItem(t('export.levelZip'), t('export.levelZipSub'), exportLevelZip),
+    menuItem(t('export.xml'), '', exportXml),
+    menuItem(t('export.png'), t('export.pngSub'), exportPng),
+    menuItem(t('export.assets'), t('export.assetsSub'), exportAssets)
   );
   document.body.append(menu);
   const r = e.target.getBoundingClientRect();
@@ -461,7 +534,7 @@ function wireNative() {
         ingest(() => loadFromZipFile(file));
         break;
       }
-      case 'new-level': if (state.vfs) newLevel(); else toast('Load game files first', 'err'); break;
+      case 'new-level': if (state.vfs) newLevel(); else toast(t('toast.loadFirst'), 'err'); break;
       case 'save': saveCurrent(); break;
       case 'export-level-zip': exportLevelZip(); break;
       case 'export-xml': exportXml(); break;
@@ -477,7 +550,7 @@ function wireNative() {
       case 'toggle-grid': document.getElementById('btn-grid')?.click(); break;
       case 'toggle-collision': document.getElementById('btn-coll')?.click(); break;
       case 'toggle-paths': document.getElementById('btn-paths')?.click(); break;
-      case 'toggle-smartrock': document.getElementById('btn-smartrock')?.click(); break;
+      case 'toggle-smartrock': { const on = !getPref('smartTerrain', true); setPref('smartTerrain', on); if (state.editor) state.editor.smartTerrain = on; toast(t('settings.smart') + ': ' + (on ? 'ON' : 'OFF'), 'info', 1800); break; }
       case 'tutorial': if (state.editor) startTutorial(); else toast('Load game files first', 'err'); break;
       case 'shortcuts': showShortcuts(); break;
     }
@@ -492,3 +565,156 @@ function dispatchKey(key, mods = {}) {
 
 wireNative();
 renderWelcome();
+
+// ============================================================ modal prompt (Electron has no window.prompt)
+
+function modalPrompt(title, label, initial, onSubmit) {
+  document.querySelector('.modal-overlay')?.remove();
+  const input = el('input', { type: 'text', value: initial });
+  const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    el('div', { class: 'welcome-card modal-card' },
+      el('h3', { text: title }),
+      el('div', { class: 'field' }, el('label', { text: label }), input),
+      el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 10px' },
+        el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
+        el('button', { class: 'btn primary', text: t('btn.create'), onclick: submit }))
+    ));
+  function submit() { const v = input.value; overlay.remove(); onSubmit(v); }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') overlay.remove(); });
+  document.body.append(overlay);
+  input.focus(); input.select();
+}
+
+// ============================================================ settings
+
+const PT_DEFAULTS = {
+  javaPath: 'java',
+  signerJar: '',
+  adbPath: 'adb',
+  deviceAddr: '127.0.0.1:16384',
+  packageName: 'com.disney.WMW',
+};
+
+function playtestSettings() {
+  return { ...PT_DEFAULTS, ...getPref('playtest', {}) };
+}
+
+function showSettings() {
+  document.querySelector('.modal-overlay')?.remove();
+  const pt = playtestSettings();
+  const isApp = !!window.native?.isApp;
+
+  const langSel = el('select', {}, ...LANGS.map(([code, name]) =>
+    el('option', { value: code, text: name, selected: code === currentLang() ? '' : null })));
+
+  const smart = el('input', { type: 'checkbox' });
+  smart.checked = getPref('smartTerrain', true);
+
+  const fields = {};
+  const pathField = (key, labelKey, browseFilters) => {
+    fields[key] = el('input', { type: 'text', value: pt[key] });
+    return el('div', { class: 'field' },
+      el('label', { text: t(labelKey) }),
+      el('div', { class: 'row gap' }, fields[key],
+        isApp && browseFilters
+          ? el('button', { class: 'btn small', text: t('btn.browse'), onclick: async () => {
+              const p = await window.native.pickPath(t(labelKey), browseFilters);
+              if (p) fields[key].value = p;
+            } })
+          : null));
+  };
+
+  const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    el('div', { class: 'welcome-card modal-card settings-card' },
+      el('h3', { text: t('settings.title') }),
+      el('div', { class: 'field' }, el('label', { text: t('settings.language') }), langSel,
+        el('span', { class: 'muted small', text: t('settings.langNote') })),
+      el('div', { class: 'sep' }),
+      el('label', { class: 'check-row' }, smart, el('span', {},
+        el('strong', { text: t('settings.smart') }),
+        el('span', { class: 'muted small', text: ' ' + t('settings.smartSub') }))),
+      el('div', { class: 'sep' }),
+      el('h4', { text: t('settings.playtest') }),
+      isApp ? null : el('p', { class: 'muted small', text: t('settings.webNote') }),
+      pathField('signerJar', 'settings.signer', [{ name: 'Java archive', extensions: ['jar'] }]),
+      pathField('adbPath', 'settings.adb', [{ name: 'adb', extensions: ['exe', '*'] }]),
+      pathField('deviceAddr', 'settings.device', null),
+      pathField('javaPath', 'settings.java', [{ name: 'java', extensions: ['exe', '*'] }]),
+      pathField('packageName', 'settings.pkg', null),
+      el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
+        el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
+        el('button', { class: 'btn primary', text: t('btn.save'), onclick: save }))
+    ));
+
+  function save() {
+    setPref('smartTerrain', smart.checked);
+    if (state.editor) state.editor.smartTerrain = smart.checked;
+    setPref('playtest', Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])));
+    const newLang = langSel.value;
+    overlay.remove();
+    if (newLang !== currentLang()) {
+      if (!state.level?.dirty || confirm(t('toast.unsaved', { name: state.level?.name || '' }))) {
+        setLang(newLang);
+        location.reload();
+      } else {
+        setLang(newLang);
+      }
+    }
+  }
+  document.body.append(overlay);
+}
+
+// ============================================================ playtest
+
+let ptRunning = false;
+
+async function runPlaytest() {
+  if (!window.native?.isApp) return toast(t('settings.webNote'), 'err', 5000);
+  if (ptRunning) return;
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
+  if (!state.vfs.sourceApk) return toast(t('pt.noApk'), 'err', 7000);
+  if (state.level?.dirty && confirm(t('pt.unsavedAsk', { name: state.level.name }))) saveCurrent();
+
+  const logBox = el('div', { class: 'pt-log' });
+  const status = el('p', { class: 'muted small', text: t('pt.building') });
+  const closeBtn = el('button', { class: 'btn primary', text: t('btn.close'), disabled: '', onclick: () => overlay.remove() });
+  const overlay = el('div', { class: 'modal-overlay' },
+    el('div', { class: 'welcome-card modal-card pt-card' },
+      el('h3', { text: t('pt.title') }), status, logBox,
+      el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 10px' }, closeBtn)));
+  document.body.append(overlay);
+
+  const addLine = (line, kind = 'out') => {
+    logBox.append(el('div', { class: 'pt-line ' + kind, text: line }));
+    logBox.scrollTop = logBox.scrollHeight;
+  };
+
+  if (!runPlaytest._wired) {
+    window.native.onPlaytestLog(({ kind, line }) => {
+      const box = document.querySelector('.pt-log');
+      if (!box) return;
+      box.append(el('div', { class: 'pt-line ' + kind, text: line }));
+      box.scrollTop = box.scrollHeight;
+    });
+    runPlaytest._wired = true;
+  }
+
+  ptRunning = true;
+  try {
+    // rebuild off the UI thread tick so the modal paints first
+    await new Promise((r) => setTimeout(r, 30));
+    const apk = rebuildApk(state.vfs.sourceApk.data, state.vfs, (m) => addLine(m, 'step'));
+    addLine(`APK ready (${(apk.length / 1048576).toFixed(1)} MB)`, 'step');
+    status.textContent = '';
+    const res = await window.native.playtest(apk, playtestSettings());
+    status.textContent = res.ok ? t('pt.done') : t('pt.failed');
+    status.className = res.ok ? 'small' : 'error small';
+  } catch (err) {
+    addLine(String(err.message || err), 'error');
+    status.textContent = t('pt.failed');
+    status.className = 'error small';
+  } finally {
+    ptRunning = false;
+    closeBtn.disabled = false;
+  }
+}

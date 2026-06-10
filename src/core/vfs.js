@@ -12,6 +12,12 @@ export class VFS {
     /** @type {Map<string, string>} normalized path -> original path */
     this.originalNames = new Map();
     this.sourceName = '';
+    /** Raw bytes of the original APK when one was ingested (used for the
+     *  playtest rebuild). Null when loaded from a bare assets folder/zip. */
+    this.sourceApk = null;
+    /** @type {Set<string>} normalized paths written after the initial load */
+    this.modified = new Set();
+    this._loading = true;
   }
 
   static normalize(path) {
@@ -22,6 +28,7 @@ export class VFS {
     const norm = VFS.normalize(path);
     this.files.set(norm, bytes);
     this.originalNames.set(norm, path.replace(/\\/g, '/').replace(/^\/+/, ''));
+    if (!this._loading) this.modified.add(norm);
   }
 
   has(path) { return this.files.has(VFS.normalize(path)); }
@@ -76,6 +83,8 @@ function ingestZipBytes(vfs, bytes, depth = 0) {
   for (const [name, data] of Object.entries(entries)) {
     const lower = name.toLowerCase();
     if (lower.endsWith('.apk') || (lower.endsWith('.zip') && looksLikeZip(data))) {
+      // remember the innermost APK so playtest can rebuild it later
+      if (lower.endsWith('.apk')) vfs.sourceApk = { name: name.split('/').pop(), data };
       ingestZipBytes(vfs, data, depth + 1);
       continue;
     }
@@ -100,8 +109,10 @@ export async function loadFromZipFile(file, onProgress) {
   onProgress?.('Reading file…');
   const buf = new Uint8Array(await file.arrayBuffer());
   onProgress?.('Unpacking archive…');
+  if (file.name.toLowerCase().endsWith('.apk')) vfs.sourceApk = { name: file.name, data: buf };
   ingestZipBytes(vfs, buf);
   validate(vfs);
+  vfs._loading = false;
   return vfs;
 }
 
@@ -116,7 +127,10 @@ export async function loadFromFolder(files, onProgress) {
     const lower = rel.toLowerCase();
     if (lower.endsWith('.apk') || lower.endsWith('.zip')) {
       const buf = new Uint8Array(await f.arrayBuffer());
-      if (looksLikeZip(buf)) ingestZipBytes(vfs, buf);
+      if (looksLikeZip(buf)) {
+        if (lower.endsWith('.apk')) vfs.sourceApk = { name: f.name, data: buf };
+        ingestZipBytes(vfs, buf);
+      }
     } else {
       const idx = lower.indexOf('assets/');
       let stored = rel;
@@ -132,6 +146,7 @@ export async function loadFromFolder(files, onProgress) {
     if (done % 200 === 0) onProgress?.(`Reading files… ${done}/${arr.length}`);
   }
   validate(vfs);
+  vfs._loading = false;
   return vfs;
 }
 

@@ -45,8 +45,28 @@ works in any browser. Everything is local. Nothing gets uploaded anywhere.
 - The fill bucket treats rock, rock shadow and rock highlight as one region
 - Toggle it off in the toolbar or the View menu if you want raw pixel control
 
+**Playtest on MuMu or any Android device (desktop app)**
+- One button (or F5): the editor rebuilds the APK with your edits baked in, signs it with
+  uber-apk-signer, installs it over adb and launches the game on your emulator
+- Works with MuMu out of the box (default device address 127.0.0.1:16384), or any adb device
+- The rebuild keeps every byte of the original APK except your changes, strips the old
+  signature and keeps resources.arsc uncompressed, which is what prevents the native crash
+- Setup once in Settings: the path to uber-apk-signer.jar and adb. Java must be installed.
+
+**Spout quick editor**
+- Select any spout or drain and get friendly dropdowns instead of raw properties:
+  behavior (always running, starts when touched, drain, drain and spout), fluid
+  (water, poison water, ooze), flow rate, particle limit and a simple on/off interval timer
+- It writes the exact properties the game reads (SpoutType, FluidType, Timer0/1 and friends)
+
+**Four languages**
+- English, Nederlands, Español and 中文, switchable in Settings
+
 **Quality of life**
-- Snapshot **undo/redo for everything** — terrain strokes and object edits alike (Ctrl+Z / Ctrl+Y)
+- Snapshot **undo/redo for everything**, terrain strokes and object edits alike (Ctrl+Z / Ctrl+Y)
+- Reopen your last game files with one click (desktop app), unsaved-changes guards everywhere
+- Alt+click with any paint tool picks the material under the cursor, Esc deselects,
+  zoom percentage in the status bar, preferences (language, smart terrain) persist
 - Grid overlay, collision-shape overlay, fit-to-view, keyboard shortcuts for every tool
 - Skippable interactive tutorial on first launch (re-open it anytime with the **?** button)
 - Create brand-new empty levels from scratch
@@ -121,3 +141,24 @@ npm run build    # → dist/ (static, host anywhere: Vercel, GitHub Pages…)
 ## License
 
 MIT — see [LICENSE](LICENSE). Game assets are © Disney; bring your own legally obtained copy.
+
+## Credits
+
+This editor stands on the shoulders of the Where's My Water modding community:
+
+- **[Where's My Editor (WME)](https://github.com/wmw-modding/wheres-my-editor)** and
+  **[wmwpy](https://github.com/wmw-modding/wmwpy)** by the wmw-modding team (GPL-3.0).
+  Their reverse engineering of the level format, the object/sprite chain and the
+  1.25 coordinate multiplier made this project possible. Willemilks Water Editor is an
+  independent implementation written from scratch, but the format knowledge traces back
+  to their work. Go star their repos.
+- The original **Where's My Water?** is © Disney. This editor does not include or
+  distribute any game assets; you load your own legally obtained copy of the game.
+
+## Legal notes (not legal advice)
+
+- The editor's own code is original and MIT licensed, so you can release it.
+- Never bundle or share the game's APK, levels, sprites or audio with the editor.
+- Don't use Disney logos or imply Disney endorses this. Naming the game for
+  compatibility ("a level editor for Where's My Water") is how the modding scene
+  normally does it.

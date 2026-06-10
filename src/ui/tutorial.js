@@ -5,7 +5,7 @@ const KEY = 'wwe_tutorial_done_v1';
 const STEPS = [
   {
     target: null,
-    title: 'Welcome to Willemilks Water Editor 💧',
+    title: 'Welcome to Willemilks Water Editor',
     body: 'A full level editor for Where\'s My Water, including the thing other editors can\'t do: painting the terrain itself. This tour takes 30 seconds.',
   },
   {
@@ -100,7 +100,7 @@ export function startTutorial() {
         <button class="btn ghost" data-act="skip">Skip tour</button>
         <div>
           ${i > 0 ? '<button class="btn ghost" data-act="back">Back</button>' : ''}
-          <button class="btn primary" data-act="next">${i === STEPS.length - 1 ? 'Start editing' : 'Next'}</button>
+          <button class="btn primary" data-act="next">${i === STEPS.length - 1 ? t('tut.done') : t('tut.next')}</button>
         </div>
       </div>`;
     card.querySelector('[data-act="skip"]').onclick = close;

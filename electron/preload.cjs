@@ -6,11 +6,23 @@ contextBridge.exposeInMainWorld('native', {
   onMenu(callback) {
     ipcRenderer.on('menu', (_e, msg) => callback(msg));
   },
+  onPlaytestLog(callback) {
+    ipcRenderer.on('playtest-log', (_e, msg) => callback(msg));
+  },
   openGame() {
     return ipcRenderer.invoke('open-game');
   },
+  readFile(filePath) {
+    return ipcRenderer.invoke('read-file', filePath);
+  },
+  pickPath(title, filters) {
+    return ipcRenderer.invoke('pick-path', { title, filters });
+  },
+  playtest(apkBytes, settings) {
+    const buf = apkBytes instanceof Uint8Array ? apkBytes : new Uint8Array(apkBytes);
+    return ipcRenderer.invoke('playtest', { apk: buf, settings });
+  },
   saveFile(defaultName, data) {
-    // data: ArrayBuffer or Uint8Array
     const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
     return ipcRenderer.invoke('save-file', { defaultName, data: buf });
   },

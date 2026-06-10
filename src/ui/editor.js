@@ -24,7 +24,7 @@ export class Editor {
     this.level = null;
     this.tool = TOOLS.SELECT;
     this.material = 'dirt';
-    this.smartRock = true; // merge painted rock with existing rock formations
+    this.smartTerrain = true; // smart merge for rock + dirt; toggle in Settings
     this.brushSize = 1;
     this.zoom = 6;
     this.panX = 0;
@@ -100,6 +100,7 @@ export class Editor {
     this.zoom = Math.max(1, Math.min(zx, zy));
     this.panX = (this.canvas.clientWidth - t.width * this.zoom) / 2;
     this.panY = (this.canvas.clientHeight - t.height * this.zoom) / 2;
+    this.events.onViewChanged?.(this.zoom);
     this.requestRender();
   }
 
@@ -157,6 +158,7 @@ export class Editor {
     this.zoom = Math.min(40, Math.max(0.5, this.zoom * factor));
     this.panX = sx - ix * this.zoom;
     this.panY = sy - iy * this.zoom;
+    this.events.onViewChanged?.(this.zoom);
     this.requestRender();
   }
 
@@ -211,6 +213,11 @@ export class Editor {
     if (this.tool === TOOLS.PICKER) {
       const px = t.getPixel(ix, iy);
       if (px) this.events.onPick?.(px);
+      return;
+    }
+    if (e.altKey && this.tool !== TOOLS.SELECT) {
+      const px = t.getPixel(ix, iy);
+      if (px) this.events.onPick?.([px[0], px[1], px[2]]);
       return;
     }
     if (this.tool === TOOLS.FILL) {
@@ -368,20 +375,25 @@ export class Editor {
 
   setSpace(down) { this._space = down; }
 
-  /** Returns the rock family RGB set when smart rock applies, else null. */
+  /** Returns the rock family RGB set when smart painting applies, else null. */
   _smartFamily() {
-    if (!this.smartRock) return null;
+    if (!this.smartTerrain) return null;
     return rockFamilyRgbs();
   }
 
-  /** Runs the highlight rim recompute over a dirty rect when smart rock is on
-   *  and the action could have touched rock (any paint does: erasing next to
-   *  rock exposes a new surface that needs a rim). */
+  /** Runs the smart merge over a dirty rect when the setting is on. For rock
+   *  it recomputes the highlight rim so painted rock fuses with existing rock;
+   *  for dirt it normalizes the near-duplicate alias so a painted patch and
+   *  the level's original dirt read as one uniform mass. */
   _smartPass(x0, y0, x1, y1) {
-    if (!this.smartRock || !this.level) return;
+    if (!this.smartTerrain || !this.level) return;
+    const t = this.level.terrain;
     const rock = getMaterial('rock').rgb;
     const hi = getMaterial('rock_hi').rgb;
-    this.level.terrain.smartRockPass(x0, y0, x1, y1, rock, hi, rockFamilyRgbs());
+    t.smartRockPass(x0, y0, x1, y1, rock, hi, rockFamilyRgbs());
+    // unify the two shipped dirt variants so masses don't show a seam
+    const dirt = getMaterial('dirt').rgb;
+    t.normalizeColorInRect(x0, y0, x1, y1, [112, 91, 49], dirt);
   }
 
   doUndo() {

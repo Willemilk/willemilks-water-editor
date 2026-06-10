@@ -22,6 +22,7 @@ export function el(tag, attrs = {}, ...children) {
 // ---------------- level browser ----------------
 
 import LEVEL_ORDER from '../data/levelOrder.json';
+import { t } from '../i18n.js';
 
 export class LevelBrowser {
   constructor(container, onOpen) {
@@ -53,7 +54,7 @@ export class LevelBrowser {
       .filter((l) => !placed.has(l.name.toLowerCase()))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((entry) => ({ entry, title: entry.name }));
-    if (rest.length) this.packs.push({ title: 'Other levels', character: '', entries: rest });
+    if (rest.length) this.packs.push({ title: t('levels.other'), character: '', entries: rest });
     this.render();
   }
 
@@ -86,7 +87,7 @@ export class LevelBrowser {
     const search = el('div', { class: 'panel-search' },
       el('input', {
         type: 'search',
-        placeholder: `Search ${this.levels.length} levels…`,
+        placeholder: t('search.levels', { n: this.levels.length }),
         value: this.filter,
         oninput: (e) => { this.filter = e.target.value; this.render(); },
       })
@@ -233,12 +234,12 @@ export class ObjectBrowser {
       el('div', { class: 'panel-search' },
         el('input', {
           type: 'search',
-          placeholder: `Search ${this.items.length} objects…`,
+          placeholder: t('search.objects', { n: this.items.length }),
           value: this.filter,
           oninput: (e) => { this.filter = e.target.value; this.render(); },
         })
       ),
-      el('div', { class: 'hint-row', text: 'Click an object, then click in the level to place it.' }),
+      el('div', { class: 'hint-row', text: t('objects.hint') }),
       el('div', { class: 'scroll obj-groups' },
         ...sections.map(([cat, items]) =>
           el('details', { class: 'obj-group', open: q ? '' : null },
@@ -285,12 +286,12 @@ export class Inspector {
     if (!this.object) {
       this.container.replaceChildren(
         el('div', { class: 'inspector-empty' },
-          el('h3', { text: 'Level properties' }),
+          el('h3', { text: t('insp.levelProps') }),
           this._kvEditor(level.properties, () => this.cb.onEdit()),
           el('div', { class: 'sep' }),
-          el('h3', { text: 'Level stats' }),
+          el('h3', { text: t('insp.levelStats') }),
           this._stats(level),
-          el('p', { class: 'muted small', text: 'Select an object in the level to edit it, or pick a material above and paint.' })
+          el('p', { class: 'muted small', text: t('insp.empty') })
         )
       );
       return;
@@ -309,20 +310,95 @@ export class Inspector {
     this.container.replaceChildren(
       el('div', { class: 'inspector-obj' },
         el('div', { class: 'insp-head' },
-          el('h3', { text: obj.type ? `${obj.type} object` : 'Object' }),
+          el('h3', { text: obj.type ? `${obj.type} ${t('insp.object')}` : t('insp.object') }),
           el('div', { class: 'row gap' },
-            el('button', { class: 'btn small', text: 'Duplicate', title: 'Ctrl+D', onclick: () => this.cb.onDuplicate(obj) }),
-            el('button', { class: 'btn small danger', text: 'Delete', title: 'Del', onclick: () => this.cb.onDelete(obj) })
+            el('button', { class: 'btn small', text: t('btn.duplicate'), title: 'Ctrl+D', onclick: () => this.cb.onDuplicate(obj) }),
+            el('button', { class: 'btn small danger', text: t('btn.delete'), title: 'Del', onclick: () => this.cb.onDelete(obj) })
           )
         ),
-        field('Name', nameInput),
+        field(t('insp.name'), nameInput),
         el('div', { class: 'row gap' }, field('X (grid)', posX), field('Y (grid)', posY)),
         el('div', { class: 'sep' }),
-        el('h4', { text: 'Properties' }),
+        this._spoutSection(obj),
+        el('h4', { text: t('insp.props') }),
         this._kvEditor(obj.properties, () => this.cb.onEdit(), obj),
         el('div', { class: 'sep' }),
         this._pathSection(obj)
       )
+    );
+  }
+
+  /** Friendly controls for spouts and drains: behavior, fluid, flow and a
+   *  simple on/off timer. Writes the same properties the game reads
+   *  (SpoutType, FluidType, ParticlesPerSecond, NumberParticles, Timer0/1). */
+  _spoutSection(obj) {
+    const isSpout = (obj.type || '').toLowerCase() === 'spout'
+      || 'SpoutType' in obj.properties
+      || /spout|drain/i.test(obj.properties.Filename || '');
+    if (!isSpout) return null;
+
+    const set = (key, value) => {
+      this.cb.push();
+      if (value === '' || value == null) delete obj.properties[key];
+      else obj.properties[key] = String(value);
+      this.cb.onEdit();
+      this.render();
+    };
+
+    const behavior = el('select', {},
+      ...[['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')],
+          ['Drain', t('spout.b.drain')], ['DrainSpout', t('spout.b.drainspout')]]
+        .map(([v, label]) => el('option', { value: v, text: label, selected: (obj.properties.SpoutType || 'OpenSpout') === v ? '' : null })));
+    behavior.onchange = () => set('SpoutType', behavior.value);
+
+    const fluid = el('select', {},
+      ...[['Water', t('spout.f.water')], ['ContaminatedWater', t('spout.f.poison')], ['Lava', t('spout.f.ooze')]]
+        .map(([v, label]) => el('option', { value: v, text: label, selected: (obj.properties.FluidType || 'Water') === v ? '' : null })));
+    fluid.onchange = () => set('FluidType', fluid.value);
+
+    const pps = el('input', { type: 'number', step: '1', min: '0', value: obj.properties.ParticlesPerSecond || '',
+      placeholder: '60', onchange: () => set('ParticlesPerSecond', pps.value) });
+    const limit = el('input', { type: 'number', step: '1', value: obj.properties.NumberParticles || '',
+      placeholder: '-1', onchange: () => set('NumberParticles', limit.value) });
+
+    // Timer0 "1 3.0" = on for 3s, Timer1 "0 2.0" = off for 2s, then loop
+    const t0 = (obj.properties.Timer0 || '').split(' ');
+    const t1 = (obj.properties.Timer1 || '').split(' ');
+    const hasTimer = obj.properties.Timer0 != null;
+    const onTime = el('input', { type: 'number', step: '0.5', min: '0.5', value: t0[0] === '1' ? t0[1] : (t1[0] === '1' ? t1[1] : '3') });
+    const offTime = el('input', { type: 'number', step: '0.5', min: '0.5', value: t0[0] === '0' ? t0[1] : (t1[0] === '0' ? t1[1] : '2') });
+    const timerChk = el('input', { type: 'checkbox' });
+    timerChk.checked = hasTimer;
+    const applyTimer = () => {
+      this.cb.push();
+      if (timerChk.checked) {
+        obj.properties.Timer0 = `1 ${parseFloat(onTime.value) || 3}`;
+        obj.properties.Timer1 = `0 ${parseFloat(offTime.value) || 2}`;
+      } else {
+        delete obj.properties.Timer0;
+        delete obj.properties.Timer1;
+      }
+      this.cb.onEdit();
+      this.render();
+    };
+    timerChk.onchange = applyTimer;
+    onTime.onchange = applyTimer;
+    offTime.onchange = applyTimer;
+
+    return el('div', { class: 'spout-box' },
+      el('h4', { text: t('spout.title') }),
+      el('div', { class: 'field' }, el('label', { text: t('spout.behavior') }), behavior),
+      el('div', { class: 'field' }, el('label', { text: t('spout.fluid') }), fluid),
+      el('div', { class: 'row gap' },
+        el('div', { class: 'field grow' }, el('label', { text: t('spout.flow') }), pps),
+        el('div', { class: 'field grow' }, el('label', { text: t('spout.limit') }), limit)),
+      el('label', { class: 'check-row' }, timerChk, el('span', { text: t('spout.timer') })),
+      hasTimer
+        ? el('div', { class: 'row gap' },
+            el('div', { class: 'field grow' }, el('label', { text: t('spout.on') }), onTime),
+            el('div', { class: 'field grow' }, el('label', { text: t('spout.off') }), offTime))
+        : null,
+      el('div', { class: 'sep' })
     );
   }
 
@@ -338,17 +414,17 @@ export class Inspector {
         const exact = mat.rgb.join(',') === key;
         return el('div', { class: 'stat-row' },
           el('span', { class: 'swatch', style: `background: rgb(${key})` }),
-          el('span', { class: 'stat-name', text: exact ? mat.name : `${mat.name}? (${key})` }),
+          el('span', { class: 'stat-name', text: exact ? t('mat.' + mat.id) : `${t('mat.' + mat.id)}? (${key})` }),
           el('span', { class: 'stat-val', text: `${((count / total) * 100).toFixed(1)}%` })
         );
       });
     return el('div', { class: 'stats' },
       el('div', { class: 'stat-row' },
-        el('span', { class: 'stat-name', text: 'Terrain size' }),
+        el('span', { class: 'stat-name', text: t('insp.terrainSize') }),
         el('span', { class: 'stat-val', text: `${level.terrain.width} × ${level.terrain.height} px` })
       ),
       el('div', { class: 'stat-row' },
-        el('span', { class: 'stat-name', text: 'Objects' }),
+        el('span', { class: 'stat-name', text: t('insp.objects') }),
         el('span', { class: 'stat-val', text: String(level.objects.length) })
       ),
       ...rows
@@ -374,9 +450,9 @@ export class Inspector {
         )
       );
     }
-    const newKey = el('input', { placeholder: 'New property…', list: 'prop-suggestions' });
+    const newKey = el('input', { placeholder: t('insp.newProp'), list: 'prop-suggestions' });
     const addBtn = el('button', {
-      class: 'btn small', text: 'Add',
+      class: 'btn small', text: t('btn.add'),
       onclick: () => {
         const k = newKey.value.trim();
         if (!k || record[k] !== undefined) return;
@@ -393,12 +469,12 @@ export class Inspector {
   _pathSection(obj) {
     const pts = obj.getPath();
     const wrap = el('div', {});
-    wrap.append(el('h4', { text: 'Motor path' }));
+    wrap.append(el('h4', { text: t('insp.motorPath') }));
     if (pts.length) {
       wrap.append(el('p', { class: 'muted small', text: 'Drag the yellow numbered handles in the level to move waypoints.' }));
     }
     const addBtn = el('button', {
-      class: 'btn small', text: pts.length ? 'Add waypoint' : 'Create path',
+      class: 'btn small', text: pts.length ? t('insp.addWaypoint') : t('insp.createPath'),
       onclick: () => {
         this.cb.push();
         const next = pts.length ? [pts[pts.length - 1][0] + 4, pts[pts.length - 1][1]] : [4, 0];
@@ -444,11 +520,11 @@ export function materialPalette(container, current, onPick) {
     ...MATERIALS.map((m) =>
       el('button', {
         class: 'mat' + (m.id === current ? ' active' : ''),
-        title: `${m.name}. ${m.desc}`,
+        title: `${t('mat.' + m.id)}. ${m.desc}`,
         onclick: () => onPick(m.id),
       },
         el('span', { class: 'swatch big', style: `background: rgb(${m.rgb.join(',')})` }),
-        el('span', { class: 'mat-name', text: m.name })
+        el('span', { class: 'mat-name', text: t('mat.' + m.id) })
       )
     )
   );
