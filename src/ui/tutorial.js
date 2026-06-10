@@ -6,7 +6,7 @@ const STEPS = [
   {
     target: null,
     title: 'Welcome to Willemilks Water Editor 💧',
-    body: 'A full level editor for Where\'s My Water — including the thing other editors can\'t do: painting the terrain itself. This tour takes 30 seconds.',
+    body: 'A full level editor for Where\'s My Water, including the thing other editors can\'t do: painting the terrain itself. This tour takes 30 seconds.',
   },
   {
     target: '#level-panel',
@@ -26,7 +26,7 @@ const STEPS = [
   {
     target: '#tab-objects',
     title: '4 · Objects',
-    body: 'Browse every object in the game with live previews — stars, spouts, fans, bombs. Click one, then click in the level to place it.',
+    body: 'Browse every object in the game with live previews: stars, spouts, fans, bombs. Click one, then click in the level to place it.',
   },
   {
     target: '#inspector',
@@ -36,7 +36,7 @@ const STEPS = [
   {
     target: '#btn-save',
     title: '6 · Save & export',
-    body: 'Save writes into the loaded game tree (in your browser). Export gives you the .xml + .png pair, ready to drop into your APK with your mod.bat workflow. Ctrl+Z undoes anything. Have fun!',
+    body: 'Save writes into the loaded game tree. Export gives you the .xml and .png pair, ready to drop into your APK with your mod.bat workflow. Ctrl+Z undoes anything. Have fun!',
   },
 ];
 

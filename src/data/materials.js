@@ -27,6 +27,11 @@ export const MATERIAL_ALIASES = {
 export const DEFAULT_LEVEL_WIDTH = 90;
 export const DEFAULT_LEVEL_HEIGHT = 120;
 
+/** The three rock variants behave as one material when Smart rock is on. */
+export const ROCK_FAMILY_IDS = ['rock', 'rock_sh', 'rock_hi'];
+export const rockFamilyRgbs = () =>
+  ROCK_FAMILY_IDS.map((id) => MATERIALS.find((m) => m.id === id).rgb);
+
 const byKey = new Map();
 for (const m of MATERIALS) byKey.set(m.rgb.join(','), m);
 

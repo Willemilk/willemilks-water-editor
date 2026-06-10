@@ -1,11 +1,13 @@
 # 💧 Willemilks Water Editor
 
-A modern, browser-based level editor for **Where's My Water?** — built to do the one thing
+A modern desktop level editor for **Where's My Water?**, built to do the one thing
 [Where's My Editor (WME)](https://github.com/wmw-modding/wheres-my-editor) can't: **edit the terrain.**
 
-Everything runs 100% client-side. No install, no Python, no server — drop your game files in and edit.
+Runs as a native Windows app (Electron) with proper File / Edit / View / Help menus, and also
+works in any browser. Everything is local. Nothing gets uploaded anywhere.
 
 ![editor](docs/screenshot.png)
+
 
 ## Features
 
@@ -28,6 +30,21 @@ Everything runs 100% client-side. No install, no Python, no server — drop your
 - Room marker (Swampy's bathtub position) shown and draggable
 - Level-wide properties + a material histogram of the open level
 
+**Levels in real game order**
+- The level browser mirrors the in-game progression, read straight from the game's own
+  `water.db`: Swampy worlds 1 to 10, Bonus, Secret, then Cranky, Mystery Duck, Allie and the
+  Lost Levels packs, each collapsible per world
+- Real level titles from the game's localization file ("First Dig" instead of `first_dig`),
+  search matches both the title and the filename
+
+**Smart rock painting**
+- Painted rock merges with rock that is already in the level instead of sitting on top of it
+- The highlight rim regenerates automatically: new top surfaces get the 2 pixel highlight edge,
+  buried edges turn back into rock body, hand placed deep shadow stays untouched
+  (rule measured on the original levels)
+- The fill bucket treats rock, rock shadow and rock highlight as one region
+- Toggle it off in the toolbar or the View menu if you want raw pixel control
+
 **Quality of life**
 - Snapshot **undo/redo for everything** — terrain strokes and object edits alike (Ctrl+Z / Ctrl+Y)
 - Grid overlay, collision-shape overlay, fit-to-view, keyboard shortcuts for every tool
@@ -38,8 +55,20 @@ Everything runs 100% client-side. No install, no Python, no server — drop your
 
 ## Getting started
 
+**Desktop app**
+
 ```bash
 npm install
+npm run app      # build + launch the desktop app
+npm run dist     # produce the Windows installer + portable exe in release/
+```
+
+`npm run dist` needs to run on Windows (it downloads the Electron runtime on first install).
+The result lands in `release/`: an NSIS installer and a portable single exe.
+
+**Browser version**
+
+```bash
 npm run dev      # → http://localhost:5173
 ```
 

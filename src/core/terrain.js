@@ -27,14 +27,16 @@ export class Terrain {
   static async fromPNGBytes(bytes) {
     const blob = new Blob([bytes], { type: 'image/png' });
     const bmp = await createImageBitmap(blob);
+    const w = bmp.width;
+    const h = bmp.height;
     const canvas = document.createElement('canvas');
-    canvas.width = bmp.width;
-    canvas.height = bmp.height;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(bmp, 0, 0);
-    const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
+    const img = ctx.getImageData(0, 0, w, h);
     bmp.close?.();
-    return new Terrain(bmp.width, bmp.height, img.data);
+    return new Terrain(w, h, img.data);
   }
 
   clone() {
@@ -96,19 +98,30 @@ export class Terrain {
     }
   }
 
-  /** Scanline flood fill of the contiguous color region under (x, y). */
-  fill(x, y, rgb) {
+  /** Scanline flood fill of the contiguous color region under (x, y).
+   *  Optional matchSet: array of RGB triples that all count as the same region
+   *  (used to fill across the rock family in one go). */
+  fill(x, y, rgb, matchSet = null) {
     const start = this.getPixel(x, y);
     if (!start) return;
-    if (start[0] === rgb[0] && start[1] === rgb[1] && start[2] === rgb[2]) return;
+    const keys = matchSet
+      ? new Set(matchSet.map((c) => c[0] * 65536 + c[1] * 256 + c[2]))
+      : null;
+    const startKey = start[0] * 65536 + start[1] * 256 + start[2];
+    if (keys && !keys.has(startKey)) keys.add(startKey);
+    if (!keys && start[0] === rgb[0] && start[1] === rgb[1] && start[2] === rgb[2]) return;
     const { width, height, data } = this;
+    const filled = new Uint8Array(width * height);
     const match = (px, py) => {
+      if (filled[py * width + px]) return false;
       const o = (py * width + px) * 4;
-      return data[o] === start[0] && data[o + 1] === start[1] && data[o + 2] === start[2];
+      const k = data[o] * 65536 + data[o + 1] * 256 + data[o + 2];
+      return keys ? keys.has(k) : k === startKey;
     };
     const stack = [[x, y]];
     while (stack.length) {
       const [cx, cy] = stack.pop();
+      if (!match(cx, cy)) continue;
       let lx = cx;
       while (lx >= 0 && match(lx, cy)) lx--;
       lx++;
@@ -116,6 +129,7 @@ export class Terrain {
       let i = lx;
       while (i < width && match(i, cy)) {
         this.setPixel(i, cy, rgb);
+        filled[cy * width + i] = 1;
         if (cy > 0) {
           const m = match(i, cy - 1);
           if (m && !spanUp) { stack.push([i, cy - 1]); spanUp = true; }
@@ -142,6 +156,40 @@ export class Terrain {
       }
     }
     return n;
+  }
+
+  /** Smart rock pass: re-derives the highlight rim inside a rect so freshly
+   *  painted rock merges seamlessly with rock that was already there.
+   *  Rule (measured on the original levels): the top 2 pixels of any exposed
+   *  rock surface are Rock Highlight; rim pixels that get buried turn back
+   *  into Rock. Hand-placed Rock Shadow (deep rock) is left untouched. */
+  smartRockPass(x0, y0, x1, y1, rockRgb, highlightRgb, familyRgbs) {
+    const xa = Math.max(0, Math.min(x0, x1) - 2);
+    const xb = Math.min(this.width - 1, Math.max(x0, x1) + 2);
+    const ya = Math.max(0, Math.min(y0, y1) - 2);
+    const yb = Math.min(this.height - 1, Math.max(y0, y1) + 2);
+    const famKeys = new Set(familyRgbs.map((c) => c[0] * 65536 + c[1] * 256 + c[2]));
+    const isFam = (x, y) => {
+      const p = this.getPixel(x, y);
+      return !!p && famKeys.has(p[0] * 65536 + p[1] * 256 + p[2]);
+    };
+    const hiKey = highlightRgb[0] * 65536 + highlightRgb[1] * 256 + highlightRgb[2];
+    for (let y = ya; y <= yb; y++) {
+      for (let x = xa; x <= xb; x++) {
+        if (!isFam(x, y)) continue;
+        // depth = how many family pixels sit on top of this one (inclusive);
+        // off-map counts as solid so border rock stays body, like the originals
+        let depth = 1;
+        while (depth <= 2 && (y - depth < 0 || isFam(x, y - depth))) depth++;
+        const p = this.getPixel(x, y);
+        const key = p[0] * 65536 + p[1] * 256 + p[2];
+        if (depth <= 2) {
+          this.setPixel(x, y, highlightRgb); // exposed rim
+        } else if (key === hiKey) {
+          this.setPixel(x, y, rockRgb); // buried rim turns into body
+        }
+      }
+    }
   }
 
   clearAll(materialId = 'empty') {

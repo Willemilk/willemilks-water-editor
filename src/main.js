@@ -28,7 +28,7 @@ function renderWelcome(error = '') {
     el('div', { class: 'welcome' },
       el('div', { class: 'welcome-card', id: 'dropzone' },
         el('div', { class: 'logo' }, el('span', { class: 'logo-drop' }, '💧'), el('h1', { text: 'Willemilks Water Editor' })),
-        el('p', { class: 'tagline', text: 'The Where\'s My Water level editor that can do it all — objects, properties, motor paths and full terrain painting.' }),
+        el('p', { class: 'tagline', text: 'The Where\'s My Water level editor that can do it all: objects, properties, motor paths and full terrain painting.' }),
         el('div', { class: 'drop-area' },
           el('p', { html: '<strong>Drop your game files here</strong>' }),
           el('p', { class: 'muted', text: 'Accepts: a .zip with the assets folder, a zip containing base.apk, or the .apk itself. Nothing leaves your browser.' }),
@@ -100,7 +100,7 @@ function renderEditor() {
           el('button', { class: 'btn', id: 'btn-undo', text: '↶ Undo', title: 'Ctrl+Z', onclick: () => state.editor.doUndo() }),
           el('button', { class: 'btn', id: 'btn-redo', text: '↷ Redo', title: 'Ctrl+Y', onclick: () => state.editor.doRedo() }),
           el('span', { class: 'vsep' }),
-          el('button', { class: 'btn primary', id: 'btn-save', text: 'Save', title: 'Ctrl+S — saves into the loaded game tree', onclick: saveCurrent }),
+          el('button', { class: 'btn primary', id: 'btn-save', text: 'Save', title: 'Ctrl+S (saves into the loaded game tree)', onclick: saveCurrent }),
           el('button', { class: 'btn', id: 'btn-export', text: 'Export ▾', onclick: toggleExportMenu }),
           el('span', { class: 'vsep' }),
           el('button', { class: 'btn ghost', title: 'Show tutorial again', text: '?', onclick: startTutorial })
@@ -131,6 +131,7 @@ function renderEditor() {
               toggleBtn('Grid', 'btn-grid', (on) => { state.editor.showGrid = on; state.editor.requestRender(); }),
               toggleBtn('Collision', 'btn-coll', (on) => { state.editor.showCollision = on; state.editor.requestRender(); }),
               toggleBtn('Paths', 'btn-paths', (on) => { state.editor.showPaths = on; state.editor.requestRender(); }, true),
+              toggleBtn('Smart rock', 'btn-smartrock', (on) => { state.editor.smartRock = on; }, true),
               el('button', { class: 'btn small', text: 'Fit', title: 'Fit level in view (0)', onclick: () => state.editor.fitView() })
             )
           ),
@@ -142,7 +143,7 @@ function renderEditor() {
               el('button', { class: 'btn', text: '+ New empty level', onclick: newLevel }))
           ),
           el('div', { class: 'statusbar', id: 'statusbar' }, el('span', { id: 'status-pos' }), el('span', { id: 'status-mat' }),
-            el('span', { class: 'grow' }), el('span', { class: 'muted small', text: 'Right-drag / middle-drag / space-drag to pan · scroll to zoom' }))
+            el('span', { class: 'grow' }), el('span', { class: 'muted small', text: 'Pan with right mouse or hold Space. Scroll to zoom.' }))
         ),
         // right inspector
         el('aside', { class: 'right scroll', id: 'inspector' })
@@ -263,8 +264,8 @@ function onGlobalKeys(e) {
 function buildTools() {
   const defs = [
     [TOOLS.SELECT, 'Select / move', 'V', '🖱️'],
-    [TOOLS.PENCIL, 'Pencil — paint terrain', 'B', '✏️'],
-    [TOOLS.ERASER, 'Eraser — paint empty', 'E', '🧽'],
+    [TOOLS.PENCIL, 'Pencil (paint terrain)', 'B', '✏️'],
+    [TOOLS.ERASER, 'Eraser (paint empty)', 'E', '🧽'],
     [TOOLS.LINE, 'Line', 'L', '📏'],
     [TOOLS.RECT, 'Rectangle (filled)', 'R', '▭'],
     [TOOLS.FILL, 'Fill bucket', 'F', '🪣'],
@@ -323,7 +324,7 @@ async function openLevel(entry) {
     }
     state.level = level;
     document.getElementById('canvas-empty').style.display = 'none';
-    document.getElementById('level-title').textContent = '— ' + entry.name;
+    document.getElementById('level-title').textContent = '· ' + entry.name;
     state.levelBrowser.setActive(entry.name);
     state.editor.setLevel(level);
     state.inspector.setObject(null);
@@ -345,7 +346,7 @@ function newLevel() {
   level.room = { x: 0, y: -30 };
   state.level = level;
   document.getElementById('canvas-empty').style.display = 'none';
-  document.getElementById('level-title').textContent = '— ' + clean + ' (new)';
+  document.getElementById('level-title').textContent = '· ' + clean + ' (new)';
   state.editor.setLevel(level);
   state.inspector.setObject(null);
   toast('New level created. Paint terrain and add a spout + drain to make it playable.', 'ok', 5000);
@@ -354,7 +355,7 @@ function newLevel() {
 function markDirty() {
   if (!state.level) return;
   state.level.dirty = true;
-  document.getElementById('level-title').textContent = '— ' + state.level.name + ' •';
+  document.getElementById('level-title').textContent = '· ' + state.level.name + ' •';
 }
 
 function updateUndoButtons() {
@@ -370,29 +371,35 @@ function saveCurrent() {
     state.levelBrowser.setLevels(state.levels);
     state.levelBrowser.setActive(state.level.name);
   }
-  document.getElementById('level-title').textContent = '— ' + state.level.name;
+  document.getElementById('level-title').textContent = '· ' + state.level.name;
   toast('Saved into the loaded game tree. Use Export to get the files out.', 'ok');
+}
+
+function exportLevelZip() {
+  if (!state.level) return toast('Open a level first', 'err');
+  downloadLevelZip(state.level);
+}
+function exportXml() {
+  if (!state.level) return toast('Open a level first', 'err');
+  downloadBytes(levelToFiles(state.level).xml, state.level.name + '.xml', 'text/xml');
+}
+function exportPng() {
+  if (!state.level) return toast('Open a level first', 'err');
+  downloadBytes(levelToFiles(state.level).png, state.level.name + '.png', 'image/png');
+}
+function exportAssets() {
+  if (!state.vfs) return toast('Load game files first', 'err');
+  setBusy('Packing assets…');
+  setTimeout(() => { try { downloadAssetsZip(state.vfs, setBusy); } finally { setBusy(null); } }, 50);
 }
 
 function toggleExportMenu(e) {
   document.querySelector('.export-menu')?.remove();
   const menu = el('div', { class: 'export-menu' },
-    menuItem('Level files (.xml + .png zip)', 'For dropping into assets/Levels in your APK.', () => {
-      if (!state.level) return toast('Open a level first', 'err');
-      downloadLevelZip(state.level);
-    }),
-    menuItem('Level .xml only', '', () => {
-      if (!state.level) return toast('Open a level first', 'err');
-      downloadBytes(levelToFiles(state.level).xml, state.level.name + '.xml', 'text/xml');
-    }),
-    menuItem('Level .png only', 'Indexed 8-bit, game-compatible.', () => {
-      if (!state.level) return toast('Open a level first', 'err');
-      downloadBytes(levelToFiles(state.level).png, state.level.name + '.png', 'image/png');
-    }),
-    menuItem('Whole assets tree (.zip)', 'Everything loaded, including your saved edits.', () => {
-      setBusy('Packing assets…');
-      setTimeout(() => { try { downloadAssetsZip(state.vfs, setBusy); } finally { setBusy(null); } }, 50);
-    })
+    menuItem('Level files (.xml + .png zip)', 'For dropping into assets/Levels in your APK.', exportLevelZip),
+    menuItem('Level .xml only', '', exportXml),
+    menuItem('Level .png only', 'Indexed 8-bit, game-compatible.', exportPng),
+    menuItem('Whole assets tree (.zip)', 'Everything loaded, including your saved edits.', exportAssets)
   );
   document.body.append(menu);
   const r = e.target.getBoundingClientRect();
@@ -416,6 +423,72 @@ function switchTab(which) {
   document.getElementById('object-panel').classList.toggle('hidden', which !== 'objects');
 }
 
+// ============================================================ native shell (Electron)
+
+const SHORTCUTS = [
+  ['V', 'Select / move'], ['B', 'Pencil'], ['E', 'Eraser'], ['L', 'Line'], ['R', 'Rectangle'],
+  ['F', 'Fill bucket'], ['I', 'Material picker'], ['1 to 9', 'Brush size'], ['G', 'Toggle grid'],
+  ['0', 'Fit level in view'], ['Scroll', 'Zoom'], ['Right mouse / Space', 'Pan'],
+  ['Shift while dragging', 'Snap object to half grid'], ['Arrow keys', 'Nudge selected object'],
+  ['Ctrl+Z / Ctrl+Y', 'Undo / redo'], ['Ctrl+D', 'Duplicate object'], ['Del', 'Delete object'],
+  ['Ctrl+S', 'Save level'], ['Esc', 'Cancel placement'],
+];
+
+function showShortcuts() {
+  document.querySelector('.shortcuts-overlay')?.remove();
+  const overlay = el('div', { class: 'shortcuts-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    el('div', { class: 'welcome-card shortcuts-card' },
+      el('h3', { text: 'Keyboard shortcuts' }),
+      el('div', { class: 'shortcut-grid' },
+        ...SHORTCUTS.flatMap(([k, label]) => [
+          el('span', { class: 'shortcut-key', text: k }),
+          el('span', { class: 'muted', text: label }),
+        ])
+      ),
+      el('div', { class: 'row gap center', style: 'justify-content: center; margin-top: 14px' },
+        el('button', { class: 'btn primary', text: 'Close', onclick: () => overlay.remove() }))
+    ));
+  document.body.append(overlay);
+}
+
+function wireNative() {
+  if (!window.native?.isApp) return;
+  window.native.onMenu(({ action, payload }) => {
+    const ed = state.editor;
+    switch (action) {
+      case 'open-game-data': {
+        const file = new File([payload.buffer], payload.name);
+        ingest(() => loadFromZipFile(file));
+        break;
+      }
+      case 'new-level': if (state.vfs) newLevel(); else toast('Load game files first', 'err'); break;
+      case 'save': saveCurrent(); break;
+      case 'export-level-zip': exportLevelZip(); break;
+      case 'export-xml': exportXml(); break;
+      case 'export-png': exportPng(); break;
+      case 'export-assets': exportAssets(); break;
+      case 'undo': ed?.doUndo(); break;
+      case 'redo': ed?.doRedo(); break;
+      case 'duplicate': document.activeElement?.blur(); dispatchKey('d', { ctrlKey: true }); break;
+      case 'delete': dispatchKey('Delete'); break;
+      case 'zoom-in': ed?.zoomBy(1.25); break;
+      case 'zoom-out': ed?.zoomBy(1 / 1.25); break;
+      case 'fit': ed?.fitView(); break;
+      case 'toggle-grid': document.getElementById('btn-grid')?.click(); break;
+      case 'toggle-collision': document.getElementById('btn-coll')?.click(); break;
+      case 'toggle-paths': document.getElementById('btn-paths')?.click(); break;
+      case 'toggle-smartrock': document.getElementById('btn-smartrock')?.click(); break;
+      case 'tutorial': if (state.editor) startTutorial(); else toast('Load game files first', 'err'); break;
+      case 'shortcuts': showShortcuts(); break;
+    }
+  });
+}
+
+function dispatchKey(key, mods = {}) {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, ...mods }));
+}
+
 // ============================================================ boot
 
+wireNative();
 renderWelcome();

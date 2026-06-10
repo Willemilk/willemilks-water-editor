@@ -21,6 +21,8 @@ export function el(tag, attrs = {}, ...children) {
 
 // ---------------- level browser ----------------
 
+import LEVEL_ORDER from '../data/levelOrder.json';
+
 export class LevelBrowser {
   constructor(container, onOpen) {
     this.container = container;
@@ -28,43 +30,111 @@ export class LevelBrowser {
     this.levels = [];
     this.activeName = null;
     this.filter = '';
+    this.openPacks = new Set(['pack0']); // first world open by default
   }
 
   setLevels(levels) {
     this.levels = levels;
+    this.byName = new Map(levels.map((l) => [l.name.toLowerCase(), l]));
+    // resolve the in-game order against what is actually on disk
+    this.packs = [];
+    const placed = new Set();
+    for (const pack of LEVEL_ORDER) {
+      const entries = [];
+      for (const lv of pack.levels) {
+        const entry = this.byName.get(lv.file.toLowerCase());
+        if (!entry) continue;
+        entries.push({ entry, title: lv.title });
+        placed.add(entry.name.toLowerCase());
+      }
+      if (entries.length) this.packs.push({ title: pack.title, character: pack.character, entries });
+    }
+    const rest = levels
+      .filter((l) => !placed.has(l.name.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((entry) => ({ entry, title: entry.name }));
+    if (rest.length) this.packs.push({ title: 'Other levels', character: '', entries: rest });
     this.render();
   }
 
   setActive(name) {
     this.activeName = name;
+    // make sure the pack containing the active level is open
+    const i = this.packs?.findIndex((p) => p.entries.some((e) => e.entry.name === name));
+    if (i >= 0) this.openPacks.add('pack' + i);
     this.render();
+  }
+
+  _row({ entry, title }, num) {
+    const showFile = title.toLowerCase() !== entry.name.toLowerCase();
+    return el('button', {
+      class: 'list-item' + (entry.name === this.activeName ? ' active' : ''),
+      onclick: () => this.onOpen(entry),
+      title: entry.name,
+    },
+      num != null ? el('span', { class: 'lvl-num', text: String(num) }) : null,
+      el('span', { class: 'list-name', text: title }),
+      showFile ? el('span', { class: 'lvl-file', text: entry.name }) : null,
+      entry.pngPath ? null : el('span', { class: 'tag warn', text: 'no png' })
+    );
   }
 
   render() {
     const q = this.filter.toLowerCase();
-    const list = this.levels.filter((l) => l.name.toLowerCase().includes(q));
-    this.container.replaceChildren(
-      el('div', { class: 'panel-search' },
-        el('input', {
-          type: 'search',
-          placeholder: `Search ${this.levels.length} levels…`,
-          value: this.filter,
-          oninput: (e) => { this.filter = e.target.value; this.render(); },
-        })
-      ),
-      el('div', { class: 'list scroll' },
-        ...list.map((l) =>
-          el('button', {
-            class: 'list-item' + (l.name === this.activeName ? ' active' : ''),
-            onclick: () => this.onOpen(l),
-            title: l.xmlPath,
-          },
-            el('span', { class: 'list-name', text: l.name }),
-            l.pngPath ? null : el('span', { class: 'tag warn', text: 'no png' })
-          )
-        )
-      )
+    const hadFocus = this.container.querySelector('.panel-search input') === document.activeElement;
+    const caret = this.filter.length;
+    const search = el('div', { class: 'panel-search' },
+      el('input', {
+        type: 'search',
+        placeholder: `Search ${this.levels.length} levels…`,
+        value: this.filter,
+        oninput: (e) => { this.filter = e.target.value; this.render(); },
+      })
     );
+    const restoreFocus = () => {
+      if (!hadFocus) return;
+      const input = search.querySelector('input');
+      input.focus();
+      input.setSelectionRange(caret, caret);
+    };
+
+    if (q) {
+      // flat results across worlds, matching display title and filename
+      const hits = [];
+      for (const pack of this.packs || []) {
+        for (const item of pack.entries) {
+          if (item.title.toLowerCase().includes(q) || item.entry.name.toLowerCase().includes(q)) {
+            hits.push(item);
+          }
+        }
+      }
+      this.container.replaceChildren(search,
+        el('div', { class: 'list scroll' }, ...hits.map((item) => this._row(item))));
+      restoreFocus();
+      return;
+    }
+
+    let lastCharacter = null;
+    const sections = [];
+    (this.packs || []).forEach((pack, i) => {
+      if (pack.character && pack.character !== lastCharacter) {
+        lastCharacter = pack.character;
+        sections.push(el('div', { class: 'world-label', text: pack.character }));
+      }
+      const id = 'pack' + i;
+      const details = el('details', {
+        class: 'obj-group',
+        open: this.openPacks.has(id) ? '' : null,
+        ontoggle: (e) => { e.target.open ? this.openPacks.add(id) : this.openPacks.delete(id); },
+      },
+        el('summary', {}, el('span', { text: pack.title }), el('span', { class: 'count', text: pack.entries.length })),
+        el('div', { class: 'list' }, ...pack.entries.map((item, n) => this._row(item, n + 1)))
+      );
+      sections.push(details);
+    });
+
+    this.container.replaceChildren(search, el('div', { class: 'scroll obj-groups' }, ...sections));
+    restoreFocus();
   }
 }
 
@@ -78,6 +148,7 @@ export class ObjectBrowser {
     this.filter = '';
     this.items = [];
     this.thumbCache = new Map();
+    this.openStacks = new Set();
   }
 
   load() {
@@ -109,6 +180,8 @@ export class ObjectBrowser {
 
   render() {
     const q = this.filter.toLowerCase();
+    const hadFocus = this.container.querySelector('.panel-search input') === document.activeElement;
+    const caret = this.filter.length;
     const groups = new Map();
     for (const item of this.items) {
       if (q && !item.name.toLowerCase().includes(q)) continue;
@@ -119,6 +192,42 @@ export class ObjectBrowser {
     const order = ['Collectibles', 'Spouts & pipes', 'Switches & doors', 'Hazards', 'Fans', 'Balloons',
       'Converters & portals', 'Platforms & props', 'Characters', 'Decoration', 'Other'];
     const sections = [...groups.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+
+    const card = (item) => {
+      const img = el('img', { alt: '', loading: 'lazy' });
+      this._thumb(item.gamePath, img);
+      return el('button', {
+        class: 'obj-card',
+        title: item.gamePath,
+        onclick: () => this.onPlace(item),
+      }, img, el('span', { text: item.name }));
+    };
+
+    /** Numbered series like z_collectible_01..50 collapse into one stack card. */
+    const stacked = (items) => {
+      if (q) return items.map(card); // searching: show everything flat
+      const byBase = new Map();
+      for (const item of items) {
+        const base = item.name.replace(/[_-]?\d+$/, '');
+        if (!byBase.has(base)) byBase.set(base, []);
+        byBase.get(base).push(item);
+      }
+      const out = [];
+      for (const [base, group] of byBase) {
+        if (group.length < 4) { out.push(...group.map(card)); continue; }
+        const key = 'stack:' + base;
+        const open = this.openStacks.has(key);
+        const img = el('img', { alt: '', loading: 'lazy' });
+        this._thumb(group[0].gamePath, img);
+        out.push(el('button', {
+          class: 'obj-card obj-stack' + (open ? ' open' : ''),
+          title: `${group.length} variants of ${base}`,
+          onclick: () => { open ? this.openStacks.delete(key) : this.openStacks.add(key); this.render(); },
+        }, img, el('span', { text: base }), el('span', { class: 'stack-count', text: '×' + group.length })));
+        if (open) out.push(el('div', { class: 'obj-grid stack-grid' }, ...group.map(card)));
+      }
+      return out;
+    };
 
     this.container.replaceChildren(
       el('div', { class: 'panel-search' },
@@ -134,21 +243,16 @@ export class ObjectBrowser {
         ...sections.map(([cat, items]) =>
           el('details', { class: 'obj-group', open: q ? '' : null },
             el('summary', {}, el('span', { text: cat }), el('span', { class: 'count', text: items.length })),
-            el('div', { class: 'obj-grid' },
-              ...items.map((item) => {
-                const img = el('img', { alt: '', loading: 'lazy' });
-                this._thumb(item.gamePath, img);
-                return el('button', {
-                  class: 'obj-card',
-                  title: item.gamePath,
-                  onclick: () => this.onPlace(item),
-                }, img, el('span', { text: item.name }));
-              })
-            )
+            el('div', { class: 'obj-grid' }, ...stacked(items))
           )
         )
       )
     );
+    if (hadFocus) {
+      const input = this.container.querySelector('.panel-search input');
+      input.focus();
+      input.setSelectionRange(caret, caret);
+    }
   }
 }
 
@@ -186,7 +290,7 @@ export class Inspector {
           el('div', { class: 'sep' }),
           el('h3', { text: 'Level stats' }),
           this._stats(level),
-          el('p', { class: 'muted small', text: 'Select an object in the level to edit it, or use the Terrain tools to paint.' })
+          el('p', { class: 'muted small', text: 'Select an object in the level to edit it, or pick a material above and paint.' })
         )
       );
       return;
@@ -340,7 +444,7 @@ export function materialPalette(container, current, onPick) {
     ...MATERIALS.map((m) =>
       el('button', {
         class: 'mat' + (m.id === current ? ' active' : ''),
-        title: `${m.name} — ${m.desc}`,
+        title: `${m.name}. ${m.desc}`,
         onclick: () => onPick(m.id),
       },
         el('span', { class: 'swatch big', style: `background: rgb(${m.rgb.join(',')})` }),

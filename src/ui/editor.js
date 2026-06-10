@@ -2,7 +2,7 @@
 // game atlases, and handles every interaction — select/move objects, paint
 // terrain, edit motor paths, zoom and pan.
 import { GRID_TO_PX, worldToImg, imgToWorld, degToRad } from '../core/coords.js';
-import { getMaterial } from '../data/materials.js';
+import { getMaterial, rockFamilyRgbs } from '../data/materials.js';
 
 export const TOOLS = {
   SELECT: 'select',
@@ -24,6 +24,7 @@ export class Editor {
     this.level = null;
     this.tool = TOOLS.SELECT;
     this.material = 'dirt';
+    this.smartRock = true; // merge painted rock with existing rock formations
     this.brushSize = 1;
     this.zoom = 6;
     this.panX = 0;
@@ -144,6 +145,16 @@ export class Editor {
     const [ix, iy] = this.screenToImg(sx, sy);
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     this.zoom = Math.min(40, Math.max(0.5, this.zoom * factor));
+    this.requestRender();
+  }
+
+  /** Zoom around the canvas center (used by the View menu and shortcuts). */
+  zoomBy(factor) {
+    if (!this.level) return;
+    const sx = this.canvas.clientWidth / 2;
+    const sy = this.canvas.clientHeight / 2;
+    const [ix, iy] = this.screenToImg(sx, sy);
+    this.zoom = Math.min(40, Math.max(0.5, this.zoom * factor));
     this.panX = sx - ix * this.zoom;
     this.panY = sy - iy * this.zoom;
     this.requestRender();
@@ -204,7 +215,11 @@ export class Editor {
     }
     if (this.tool === TOOLS.FILL) {
       this.level.pushUndo();
-      t.fill(ix, iy, this._rgb());
+      const startPx = t.getPixel(ix, iy);
+      const fam = this._smartFamily();
+      const startIsFam = fam && startPx && fam.some((c) => c[0] === startPx[0] && c[1] === startPx[1] && c[2] === startPx[2]);
+      t.fill(ix, iy, this._rgb(), startIsFam ? fam : null);
+      this._smartPass(0, 0, t.width - 1, t.height - 1);
       this.refreshTerrain();
       this.events.onChange?.();
       return;
@@ -212,6 +227,7 @@ export class Editor {
     if (this.tool === TOOLS.PENCIL || this.tool === TOOLS.ERASER) {
       this.level.pushUndo();
       t.stamp(ix, iy, this._rgb(), this.brushSize);
+      this._smartPass(ix - this.brushSize, iy - this.brushSize, ix + this.brushSize, iy + this.brushSize);
       this.dragging = { kind: 'paint', lx: ix, ly: iy };
       this.refreshTerrain();
       return;
@@ -274,6 +290,10 @@ export class Editor {
       this.requestRender();
     } else if (d.kind === 'paint') {
       this.level.terrain.line(d.lx, d.ly, ix, iy, this._rgb(), this.brushSize);
+      this._smartPass(
+        Math.min(d.lx, ix) - this.brushSize, Math.min(d.ly, iy) - this.brushSize,
+        Math.max(d.lx, ix) + this.brushSize, Math.max(d.ly, iy) + this.brushSize
+      );
       d.lx = ix; d.ly = iy;
       this.refreshTerrain();
     } else if (d.kind === 'shape') {
@@ -291,6 +311,10 @@ export class Editor {
       const rgb = this._rgb();
       if (this.tool === TOOLS.LINE) this.level.terrain.line(d.x0, d.y0, d.x1, d.y1, rgb, this.brushSize);
       else this.level.terrain.rect(d.x0, d.y0, d.x1, d.y1, rgb, !this._altRect);
+      this._smartPass(
+        Math.min(d.x0, d.x1) - this.brushSize, Math.min(d.y0, d.y1) - this.brushSize,
+        Math.max(d.x0, d.x1) + this.brushSize, Math.max(d.y0, d.y1) + this.brushSize
+      );
       this.shapePreview = null;
       this.refreshTerrain();
       this.events.onChange?.();
@@ -343,6 +367,22 @@ export class Editor {
   }
 
   setSpace(down) { this._space = down; }
+
+  /** Returns the rock family RGB set when smart rock applies, else null. */
+  _smartFamily() {
+    if (!this.smartRock) return null;
+    return rockFamilyRgbs();
+  }
+
+  /** Runs the highlight rim recompute over a dirty rect when smart rock is on
+   *  and the action could have touched rock (any paint does: erasing next to
+   *  rock exposes a new surface that needs a rim). */
+  _smartPass(x0, y0, x1, y1) {
+    if (!this.smartRock || !this.level) return;
+    const rock = getMaterial('rock').rgb;
+    const hi = getMaterial('rock_hi').rgb;
+    this.level.terrain.smartRockPass(x0, y0, x1, y1, rock, hi, rockFamilyRgbs());
+  }
 
   doUndo() {
     if (this.level?.undo()) {
