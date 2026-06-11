@@ -1,7 +1,19 @@
 // Side panels: level browser (left), object browser (left tab), and the
 // properties inspector (right).
 import { categorize } from '../core/objects.js';
+import { GRID_TO_PX, degToRad } from '../core/coords.js';
 import { MATERIALS, nearestMaterial, materialForColor } from '../data/materials.js';
+
+/** Every fluid the game ships levels with (found by scanning all 636 levels). */
+const FLUIDS = [
+  ['Water', 'spout.f.water'],
+  ['ContaminatedWater', 'spout.f.poison'],
+  ['Lava', 'spout.f.ooze'],
+  ['Steam', 'spout.f.steam'],
+  ['Mud', 'spout.f.mud'],
+  ['wetmud', 'spout.f.wetmud'],
+  ['drymud', 'spout.f.drymud'],
+];
 
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -166,6 +178,8 @@ export class ObjectBrowser {
     this.render();
   }
 
+  /** Composite thumbnail: draws every sprite of the object, scaled to fit,
+   *  the same way the canvas renders it (so multi part objects are complete). */
   async _thumb(gamePath, img) {
     if (this.thumbCache.has(gamePath)) {
       img.src = this.thumbCache.get(gamePath);
@@ -173,15 +187,35 @@ export class ObjectBrowser {
     }
     try {
       const vis = await this.resolver.resolveVisual(gamePath);
-      const s = vis.sprites.find((x) => x.bitmap && x.rect);
-      if (!s) return;
-      const c = document.createElement('canvas');
+      const all = vis.sprites.filter((s) => s.bitmap && s.rect);
+      // prefer foreground parts so the actual object fills the thumbnail; only
+      // fall back to background sprites when that is all the object has
+      const fg = all.filter((s) => !s.isBackground);
+      const drawable = fg.length ? fg : all;
+      if (!drawable.length) return;
       const size = 40;
+      const c = document.createElement('canvas');
       c.width = size; c.height = size;
       const ctx = c.getContext('2d');
-      const scale = Math.min(size / s.rect.w, size / s.rect.h);
-      const dw = s.rect.w * scale, dh = s.rect.h * scale;
-      ctx.drawImage(s.bitmap, s.rect.x, s.rect.y, s.rect.w, s.rect.h, (size - dw) / 2, (size - dh) / 2, dw, dh);
+      // tight bbox over the actual sprite rectangles (bboxPx is rotation padded)
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const s of drawable) {
+        const cx = s.pos[0] * GRID_TO_PX, cy = -s.pos[1] * GRID_TO_PX;
+        const r = Math.hypot(s.wPx, s.hPx) / 2;
+        minX = Math.min(minX, cx - r); maxX = Math.max(maxX, cx + r);
+        minY = Math.min(minY, cy - r); maxY = Math.max(maxY, cy + r);
+      }
+      const scale = (size - 2) / Math.max(maxX - minX, maxY - minY, 1);
+      ctx.translate(size / 2 - ((minX + maxX) / 2) * scale, size / 2 - ((minY + maxY) / 2) * scale);
+      for (const s of drawable) {
+        ctx.save();
+        ctx.translate(s.pos[0] * GRID_TO_PX * scale, -s.pos[1] * GRID_TO_PX * scale);
+        ctx.rotate(-degToRad(s.angle));
+        ctx.scale(s.flipX ? -1 : 1, s.flipY ? -1 : 1);
+        const dw = s.wPx * scale, dh = s.hPx * scale;
+        ctx.drawImage(s.bitmap, s.rect.x, s.rect.y, s.rect.w, s.rect.h, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+      }
       const url = c.toDataURL();
       this.thumbCache.set(gamePath, url);
       img.src = url;
@@ -472,12 +506,29 @@ export class Inspector {
       return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
     };
     const sel = (key, labelKey, options, dflt = '') => {
+      // the game treats these values case insensitively (levels ship 'lava', 'Lava', …)
+      const cur = String(obj.properties[key] ?? dflt).toLowerCase();
       const s = el('select', {}, ...options.map(([v, lk]) =>
-        el('option', { value: v, text: t(lk), selected: (obj.properties[key] ?? dflt) === v ? '' : null })));
+        el('option', { value: v, text: t(lk), selected: cur === v.toLowerCase() ? '' : null })));
       s.onchange = () => set(key, s.value);
       return el('div', { class: 'field' }, el('label', { text: t(labelKey) }), s);
     };
-    return { set, num, chk, sel };
+    // Draggable alone does nothing in game: the engine only reacts to touch
+    // when Interactive is on too (and e.g. bomb.hs does not author it)
+    const dragChk = () => {
+      const c = el('input', { type: 'checkbox' });
+      c.checked = obj.properties.Draggable === '1' || obj.properties.Draggable === 'true';
+      c.onchange = () => {
+        this.cb.push();
+        obj.properties.Draggable = c.checked ? '1' : '0';
+        if (c.checked && obj.properties.Interactive === undefined) obj.properties.Interactive = '1';
+        this.cb.onEdit();
+      };
+      return el('div', { class: 'field' },
+        el('label', { class: 'check-row' }, c, el('span', { text: t('prop.draggable') })),
+        el('span', { class: 'muted small', text: t('prop.dragHint') }));
+    };
+    return { set, num, chk, sel, dragChk };
   }
 
   _section(kind, titleKey, ...children) {
@@ -488,13 +539,13 @@ export class Inspector {
   }
 
   _bombSection(obj) {
-    const { num, chk } = this._controls(obj);
+    const { num, dragChk } = this._controls(obj);
     return this._section('bomb', 'sec.bomb',
       el('div', { class: 'row gap' },
         num('BlastRadius', 'prop.blastRadius', '5', '0.5'),
         num('BlastPower', 'prop.blastPower', '4000', '100')),
       num('GravityScale', 'prop.gravity', '0', '0.1'),
-      chk('Draggable', 'prop.draggable'));
+      dragChk());
   }
 
   _fanSection(obj) {
@@ -510,11 +561,31 @@ export class Inspector {
   }
 
   _balloonSection(obj) {
-    const { num, chk } = this._controls(obj);
+    const { num, dragChk } = this._controls(obj);
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    // InitialParticles is "<fluid> <count>" in the game ("water 70", "Steam 50", …)
+    const init = String(obj.properties.InitialParticles || defaults.InitialParticles || 'water 10').trim().split(/\s+/);
+    const curFluid = (init[0] || 'water').toLowerCase();
+    const curCount = init[1] || '10';
+    const write = () => {
+      this.cb.push();
+      obj.properties.InitialParticles = fluidSel.value.toLowerCase() + ' ' + (parseInt(countInp.value, 10) || 0);
+      this.cb.onEdit();
+    };
+    const fluidSel = el('select', {}, ...FLUIDS.map(([v, lk]) =>
+      el('option', { value: v, text: t(lk), selected: curFluid === v.toLowerCase() ? '' : null })));
+    const countInp = el('input', { type: 'number', step: '5', min: '0', value: curCount });
+    fluidSel.onchange = write;
+    countInp.onchange = write;
     return this._section('balloon', 'sec.balloon',
-      num('GravityScale', 'prop.buoyancy', '-1', '0.1'),
-      num('VelDamping', 'prop.damping', '0.99', '0.01'),
-      chk('Draggable', 'prop.draggable'));
+      el('div', { class: 'row gap' },
+        el('div', { class: 'field grow' }, el('label', { text: t('prop.initialFluid') }), fluidSel),
+        el('div', { class: 'field grow' }, el('label', { text: t('prop.initialCount') }), countInp)),
+      num('MaxParticles', 'prop.maxParticles', '70', '5'),
+      this._connPicker(obj, 'ConnectedSpout', t('conn.balloon')),
+      num('GravityScale', 'prop.buoyancy', '', '0.1'),
+      num('VelDamping', 'prop.damping', '', '0.01'),
+      dragChk());
   }
 
   _connSlots(obj, prefix) {
@@ -542,8 +613,7 @@ export class Inspector {
     const { sel, num } = this._controls(obj);
     const slots = this._connSlots(obj, 'ConnectedSpout');
     return this._section('converter', 'sec.converter',
-      sel('FluidType', 'prop.outputFluid',
-        [['Water', 'spout.f.water'], ['ContaminatedWater', 'spout.f.poison'], ['Lava', 'spout.f.ooze']], 'Water'),
+      sel('FluidType', 'prop.outputFluid', FLUIDS, 'Water'),
       el('div', { class: 'field' },
         el('label', { text: t('conn.title') }),
         ...slots.flatMap((i) => [
@@ -565,9 +635,9 @@ export class Inspector {
   }
 
   _brokenpipeSection(obj) {
-    const { num, chk } = this._controls(obj);
+    const { num, dragChk } = this._controls(obj);
     return this._section('brokenpipe', 'sec.brokenpipe',
-      chk('Draggable', 'prop.draggable'),
+      dragChk(),
       num('GravityScale', 'prop.gravity', '0', '0.1'));
   }
 
@@ -586,8 +656,7 @@ export class Inspector {
       el('div', { class: 'row gap' },
         num('SprinklerWidth', 'prop.sprinkWidth', '8', '1'),
         num('SprinklerSteps', 'prop.sprinkSteps', '', '1')),
-      sel('FluidType', 'prop.outputFluid',
-        [['Water', 'spout.f.water'], ['ContaminatedWater', 'spout.f.poison'], ['Lava', 'spout.f.ooze']], 'Water'),
+      sel('FluidType', 'prop.outputFluid', FLUIDS, 'Water'),
       el('div', { class: 'row gap' },
         num('ParticlesPerSecond', 'spout.flow', '60', '1'),
         num('NumberParticles', 'spout.limit', '-1', '1')));
@@ -648,21 +717,49 @@ export class Inspector {
       this.render();
     };
 
+    // the game reads unset values from the object's .hs DefaultProperties
+    // (e.g. basic_drain.hs ships SpoutType=DrainSpout, murky spouts ship
+    // FluidType=ContaminatedWater) — mirror that so the UI tells the truth
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const effType = obj.properties.SpoutType || defaults.SpoutType || 'OpenSpout';
+    const effFluid = String(obj.properties.FluidType || defaults.FluidType || 'Water').toLowerCase();
+
     const behavior = el('select', {},
       ...[['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')],
           ['Drain', t('spout.b.drain')], ['DrainSpout', t('spout.b.drainspout')]]
-        .map(([v, label]) => el('option', { value: v, text: label, selected: (obj.properties.SpoutType || 'OpenSpout') === v ? '' : null })));
+        .map(([v, label]) => el('option', { value: v, text: label, selected: effType === v ? '' : null })));
     behavior.onchange = () => set('SpoutType', behavior.value);
 
     const fluid = el('select', {},
-      ...[['Water', t('spout.f.water')], ['ContaminatedWater', t('spout.f.poison')], ['Lava', t('spout.f.ooze')]]
-        .map(([v, label]) => el('option', { value: v, text: label, selected: (obj.properties.FluidType || 'Water') === v ? '' : null })));
+      ...FLUIDS.map(([v, lk]) => el('option', { value: v, text: t(lk), selected: effFluid === v.toLowerCase() ? '' : null })));
     fluid.onchange = () => set('FluidType', fluid.value);
 
     const pps = el('input', { type: 'number', step: '1', min: '0', value: obj.properties.ParticlesPerSecond || '',
-      placeholder: '60', onchange: () => set('ParticlesPerSecond', pps.value) });
+      placeholder: defaults.ParticlesPerSecond || '60', onchange: () => set('ParticlesPerSecond', pps.value) });
     const limit = el('input', { type: 'number', step: '1', value: obj.properties.NumberParticles || '',
-      placeholder: '-1', onchange: () => set('NumberParticles', limit.value) });
+      placeholder: defaults.NumberParticles || '-1', onchange: () => set('NumberParticles', limit.value) });
+    const speed = el('input', { type: 'number', step: '1', min: '0', value: obj.properties.ParticleSpeed || '',
+      placeholder: defaults.ParticleSpeed || '30', onchange: () => set('ParticleSpeed', speed.value) });
+
+    // drains push what they swallow out of their connected spouts
+    const isDrain = effType === 'Drain' || effType === 'DrainSpout';
+    const slots = this._connSlots(obj, 'ConnectedSpout');
+    const probInput = (i) => el('input', { type: 'number', step: '5', min: '0', max: '100',
+      value: obj.properties['ConnectedSpoutProbability' + i] || '', placeholder: '100',
+      onchange: (e) => set('ConnectedSpoutProbability' + i, e.target.value) });
+    const drainBlock = isDrain
+      ? el('div', { class: 'field' },
+          el('label', { text: t('conn.title') }),
+          ...slots.flatMap((i) => [
+            this._connPicker(obj, 'ConnectedSpout' + i, t('conn.output', { n: i })),
+            el('div', { class: 'row gap', style: 'align-items:center; margin-bottom:6px' },
+              el('span', { class: 'conn-label', text: t('prop.probability') }), probInput(i)),
+          ]),
+          el('button', {
+            class: 'btn small', text: '+ ' + t('conn.add'),
+            onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedSpout' + slots.length),
+          }))
+      : null;
 
     // Timer0 "1 3.0" = on for 3s, Timer1 "0 2.0" = off for 2s, then loop
     const t0 = (obj.properties.Timer0 || '').split(' ');
@@ -694,7 +791,9 @@ export class Inspector {
       el('div', { class: 'field' }, el('label', { text: t('spout.fluid') }), fluid),
       el('div', { class: 'row gap' },
         el('div', { class: 'field grow' }, el('label', { text: t('spout.flow') }), pps),
+        el('div', { class: 'field grow' }, el('label', { text: t('prop.particleSpeed') }), speed),
         el('div', { class: 'field grow' }, el('label', { text: t('spout.limit') }), limit)),
+      drainBlock,
       el('label', { class: 'check-row' }, timerChk, el('span', { text: t('spout.timer') })),
       hasTimer
         ? el('div', { class: 'row gap' },

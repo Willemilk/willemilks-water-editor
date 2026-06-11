@@ -283,6 +283,14 @@ export class Editor {
     this.events.onHover?.({ ix, iy, wx, wy, pixel: this.level.terrain.getPixel(ix, iy) });
 
     if (!d) {
+      // while picking a connection target, highlight the object under the cursor
+      if (this.pickObjectMode) {
+        this._hitObject(sx, sy).then((hit) => {
+          if (hit !== this._pickHover) { this._pickHover = hit; this.requestRender(); }
+        });
+        this._cursor = [sx, sy];
+        return;
+      }
       if (this.tool === TOOLS.SELECT) {
         const h = this._hitPathHandle(sx, sy);
         if ((h?.index ?? -1) !== (this.hoverPathHandle?.index ?? -1) || h?.obj !== this.hoverPathHandle?.obj) {
@@ -608,6 +616,23 @@ export class Editor {
       ctx.textBaseline = 'middle';
       ctx.fillText('R', rx, ry + 0.5);
       ctx.restore();
+    }
+
+    // connection pick: ring the object the cursor is over
+    if (this.pickObjectMode && this._pickHover) {
+      const vis = this.visualCache.get((this._pickHover.filename || '').toLowerCase());
+      const [hx, hy] = this.worldToScreen(this._pickHover.x, this._pickHover.y);
+      const b = vis?.bboxPx || { minX: -7, minY: -7, maxX: 7, maxY: 7 };
+      ctx.save();
+      ctx.strokeStyle = '#ffb454';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#ffb454';
+      ctx.shadowBlur = 10;
+      ctx.strokeRect(hx + b.minX * this.zoom - 3, hy + b.minY * this.zoom - 3,
+        (b.maxX - b.minX) * this.zoom + 6, (b.maxY - b.minY) * this.zoom + 6);
+      ctx.restore();
+    } else if (!this.pickObjectMode && this._pickHover) {
+      this._pickHover = null;
     }
 
     // selection + path overlay

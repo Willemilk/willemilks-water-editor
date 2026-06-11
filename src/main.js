@@ -291,6 +291,9 @@ function renderEditor() {
   const inspector = new Inspector(document.getElementById('inspector'), {
     getLevel: () => state.level,
     push: () => state.level?.pushUndo(),
+    // the game falls back to the object's .hs DefaultProperties for anything the
+    // level XML leaves out — expose those so the quick editors show the truth
+    getDefaults: (obj) => { try { return state.resolver.getHS(obj.filename).defaults || {}; } catch { return {}; } },
     onEdit: () => { state.editor.requestRender(); updateUndoButtons(); markDirty(); },
     onPickConnection: (obj, propName) => {
       // next click on an object in the canvas wires it into this property
