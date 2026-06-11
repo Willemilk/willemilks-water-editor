@@ -1,7 +1,7 @@
 // Side panels: level browser (left), object browser (left tab), and the
 // properties inspector (right).
 import { categorize } from '../core/objects.js';
-import { MATERIALS, nearestMaterial } from '../data/materials.js';
+import { MATERIALS, nearestMaterial, materialForColor } from '../data/materials.js';
 
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -23,6 +23,19 @@ export function el(tag, attrs = {}, ...children) {
 
 import LEVEL_ORDER from '../data/levelOrder.json';
 import { t } from '../i18n.js';
+
+/** Search input with a clear button that appears while there is text. */
+function searchBox(placeholder, value, oninput) {
+  const input = el('input', { type: 'search', placeholder, value, oninput });
+  return el('div', { class: 'panel-search' },
+    input,
+    value
+      ? el('button', {
+          class: 'search-clear', title: t('btn.cancel'), html: '&times;',
+          onclick: () => { input.value = ''; oninput({ target: input }); },
+        })
+      : null);
+}
 
 export class LevelBrowser {
   constructor(container, onOpen) {
@@ -66,7 +79,7 @@ export class LevelBrowser {
     this.render();
   }
 
-  _row({ entry, title }, num) {
+  _row({ entry, title }, num, packTitle = null) {
     const showFile = title.toLowerCase() !== entry.name.toLowerCase();
     return el('button', {
       class: 'list-item' + (entry.name === this.activeName ? ' active' : ''),
@@ -75,7 +88,8 @@ export class LevelBrowser {
     },
       num != null ? el('span', { class: 'lvl-num', text: String(num) }) : null,
       el('span', { class: 'list-name', text: title }),
-      showFile ? el('span', { class: 'lvl-file', text: entry.name }) : null,
+      packTitle ? el('span', { class: 'tag', text: packTitle }) : null,
+      showFile && !packTitle ? el('span', { class: 'lvl-file', text: entry.name }) : null,
       entry.pngPath ? null : el('span', { class: 'tag warn', text: 'no png' })
     );
   }
@@ -84,14 +98,8 @@ export class LevelBrowser {
     const q = this.filter.toLowerCase();
     const hadFocus = this.container.querySelector('.panel-search input') === document.activeElement;
     const caret = this.filter.length;
-    const search = el('div', { class: 'panel-search' },
-      el('input', {
-        type: 'search',
-        placeholder: t('search.levels', { n: this.levels.length }),
-        value: this.filter,
-        oninput: (e) => { this.filter = e.target.value; this.render(); },
-      })
-    );
+    const search = searchBox(t('search.levels', { n: this.levels.length }), this.filter,
+      (e) => { this.filter = e.target.value; this.render(); });
     const restoreFocus = () => {
       if (!hadFocus) return;
       const input = search.querySelector('input');
@@ -100,17 +108,18 @@ export class LevelBrowser {
     };
 
     if (q) {
-      // flat results across worlds, matching display title and filename
+      // flat results across worlds, matching display title and filename;
+      // each hit shows which world it belongs to
       const hits = [];
       for (const pack of this.packs || []) {
         for (const item of pack.entries) {
           if (item.title.toLowerCase().includes(q) || item.entry.name.toLowerCase().includes(q)) {
-            hits.push(item);
+            hits.push({ item, pack });
           }
         }
       }
       this.container.replaceChildren(search,
-        el('div', { class: 'list scroll' }, ...hits.map((item) => this._row(item))));
+        el('div', { class: 'list scroll' }, ...hits.map(({ item, pack }) => this._row(item, null, pack.title))));
       restoreFocus();
       return;
     }
@@ -231,14 +240,8 @@ export class ObjectBrowser {
     };
 
     this.container.replaceChildren(
-      el('div', { class: 'panel-search' },
-        el('input', {
-          type: 'search',
-          placeholder: t('search.objects', { n: this.items.length }),
-          value: this.filter,
-          oninput: (e) => { this.filter = e.target.value; this.render(); },
-        })
-      ),
+      searchBox(t('search.objects', { n: this.items.length }), this.filter,
+        (e) => { this.filter = e.target.value; this.render(); }),
       el('div', { class: 'hint-row', text: t('objects.hint') }),
       el('div', { class: 'scroll obj-groups' },
         ...sections.map(([cat, items]) =>
@@ -259,16 +262,62 @@ export class ObjectBrowser {
 
 // ---------------- properties inspector ----------------
 
+/** Accent color per object kind, used for section borders and badges. */
+const KIND_COLORS = {
+  spout: '#2ea7ff',
+  bomb: '#ff5d5d',
+  fan: '#3ddc84',
+  balloon: '#19c8a8',
+  switch: '#ffb454',
+  converter: '#a78bfa',
+  ypipe: '#5eead4',
+  brokenpipe: '#d97706',
+  teleport: '#60a5fa',
+  sprinkler: '#38bdf8',
+  motor: '#94a6bb',
+  collectible: '#fbbf24',
+  generic: '#5c6f85',
+};
+
+const KIND_SECTION_KEY = {
+  bomb: 'sec.bomb', fan: 'sec.fan', balloon: 'sec.balloon', switch: 'sec.switch',
+  converter: 'sec.converter', ypipe: 'sec.ypipe', brokenpipe: 'sec.brokenpipe',
+  teleport: 'sec.teleport', sprinkler: 'sec.sprinkler', motor: 'sec.motor',
+};
+
 export class Inspector {
   constructor(container, callbacks) {
     this.container = container;
-    this.cb = callbacks; // { onEdit(), getLevel(), onDelete(obj), onDuplicate(obj) }
+    // { onEdit(), getLevel(), push(), onDelete(obj), onDuplicate(obj), onPickConnection(obj, propName) }
+    this.cb = callbacks;
     this.object = null;
+    this._advOpen = null; // remembers the Advanced properties fold per object
   }
 
   setObject(obj) {
     this.object = obj;
+    this._advOpen = null;
     this.render();
+  }
+
+  /** Classify the selected object so the right quick editor shows up. */
+  _objectKind(obj) {
+    const fn = (obj.properties.Filename || '').toLowerCase();
+    const type = (obj.type || '').toLowerCase();
+    const p = obj.properties;
+    if (/bomb|mine/.test(fn)) return 'bomb';
+    if (/fan|vacuum/.test(fn)) return 'fan';
+    if (/balloon|bubble/.test(fn)) return 'balloon';
+    if (/y[_-]?switch|pipe_y/.test(fn) || p.YSwitchPosition !== undefined) return 'ypipe';
+    if (/switch|lever/.test(fn) || p.SwitchType !== undefined) return 'switch';
+    if (/converter/.test(fn) || p.ConnectedConverter !== undefined) return 'converter';
+    if (/broken/.test(fn)) return 'brokenpipe';
+    if (/teleport|portal/.test(fn)) return 'teleport';
+    if (/sprinkler/.test(fn) || p.SprinklerWidth !== undefined) return 'sprinkler';
+    if (type === 'spout' || /spout|drain|faucet|shower|valve/.test(fn) || p.SpoutType !== undefined) return 'spout';
+    if (/star|duck|note|collect/.test(fn)) return 'collectible';
+    if (p.PathPos0 !== undefined || p.MotorMoveSpeed !== undefined || p.MotorOn !== undefined) return 'motor';
+    return 'generic';
   }
 
   /** Lightweight position refresh while dragging. */
@@ -307,25 +356,279 @@ export class Inspector {
     const posY = el('input', { type: 'number', step: '0.25', value: fmt(obj.y), 'data-pos-y': '1',
       onchange: (e) => { this.cb.push(); obj.y = parseFloat(e.target.value) || 0; this.cb.onEdit(); } });
 
+    const kind = this._objectKind(obj);
+    const color = KIND_COLORS[kind] || KIND_COLORS.generic;
+    const badgeText = kind === 'spout' ? (obj.type || 'spout') : (KIND_SECTION_KEY[kind] ? t(KIND_SECTION_KEY[kind]) : obj.type);
+    const smart = this._smartSection(obj, kind);
+    // objects of any kind can sit on a motor path; surface those props too
+    const extraMotor = kind !== 'motor' && obj.properties.PathPos0 !== undefined ? this._motorSection(obj) : null;
+    const advOpen = this._advOpen ?? (kind === 'generic' && !smart);
+
     this.container.replaceChildren(
       el('div', { class: 'inspector-obj' },
         el('div', { class: 'insp-head' },
           el('h3', { text: obj.type ? `${obj.type} ${t('insp.object')}` : t('insp.object') }),
-          el('div', { class: 'row gap' },
+          badgeText ? el('span', { class: 'obj-badge', style: `color:${color};border-color:${color}`, text: badgeText }) : null,
+          el('div', { class: 'row gap', style: 'margin-left:auto' },
             el('button', { class: 'btn small', text: t('btn.duplicate'), title: 'Ctrl+D', onclick: () => this.cb.onDuplicate(obj) }),
             el('button', { class: 'btn small danger', text: t('btn.delete'), title: 'Del', onclick: () => this.cb.onDelete(obj) })
           )
         ),
         field(t('insp.name'), nameInput),
         el('div', { class: 'row gap' }, field('X (grid)', posX), field('Y (grid)', posY)),
+        this._bulkRow(obj),
         el('div', { class: 'sep' }),
-        this._spoutSection(obj),
-        el('h4', { text: t('insp.props') }),
-        this._kvEditor(obj.properties, () => this.cb.onEdit(), obj),
+        smart,
+        extraMotor,
+        el('details', {
+          class: 'adv-props',
+          open: advOpen ? '' : null,
+          ontoggle: (e) => { this._advOpen = e.target.open; },
+        },
+          el('summary', { text: t('sec.advanced') }),
+          this._kvEditor(obj.properties, () => this.cb.onEdit(), obj)),
         el('div', { class: 'sep' }),
         this._pathSection(obj)
       )
     );
+  }
+
+  /** Copy properties as JSON, and apply them to all objects of the same kind. */
+  _bulkRow(obj) {
+    const level = this.cb.getLevel();
+    const alike = level ? level.objects.filter((o) => o.properties.Filename && o.properties.Filename === obj.properties.Filename) : [];
+    const copyBtn = el('button', {
+      class: 'btn small ghost', text: t('insp.copyProps'),
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(
+            { name: obj.name, x: obj.x, y: obj.y, properties: obj.properties }, null, 2));
+          copyBtn.textContent = t('insp.copied');
+          setTimeout(() => { copyBtn.textContent = t('insp.copyProps'); }, 1500);
+        } catch { /* clipboard unavailable */ }
+      },
+    });
+    const applyBtn = alike.length > 1
+      ? el('button', {
+          class: 'btn small ghost', text: t('insp.applyAll', { n: alike.length }),
+          onclick: () => {
+            if (!confirm(t('insp.applyAllAsk', { n: alike.length }))) return;
+            this.cb.push();
+            for (const o of alike) {
+              if (o === obj) continue;
+              for (const [k, v] of Object.entries(obj.properties)) {
+                // keep identity, placement and per object wiring out of the bulk copy
+                if (k === 'Filename' || k === 'Type' || k === 'Angle') continue;
+                if (/^PathPos/.test(k) || /^Connected/.test(k)) continue;
+                o.properties[k] = v;
+              }
+            }
+            this.cb.onEdit();
+          },
+        })
+      : null;
+    return el('div', { class: 'row gap', style: 'margin-bottom:9px' }, copyBtn, applyBtn);
+  }
+
+  // ---------------- smart sections per object kind ----------------
+
+  _smartSection(obj, kind) {
+    switch (kind) {
+      case 'spout': return this._spoutSection(obj);
+      case 'bomb': return this._bombSection(obj);
+      case 'fan': return this._fanSection(obj);
+      case 'balloon': return this._balloonSection(obj);
+      case 'switch': return this._switchSection(obj);
+      case 'converter': return this._converterSection(obj);
+      case 'ypipe': return this._ypipeSection(obj);
+      case 'brokenpipe': return this._brokenpipeSection(obj);
+      case 'teleport': return this._teleportSection(obj);
+      case 'sprinkler': return this._sprinklerSection(obj);
+      case 'motor': return this._motorSection(obj);
+      default: return this._genericPhysicsSection(obj);
+    }
+  }
+
+  /** Shared small controls. Every write goes through set(): push undo,
+   *  stringify, delete when emptied, notify. */
+  _controls(obj) {
+    const set = (key, value) => {
+      this.cb.push();
+      if (value === '' || value == null) delete obj.properties[key];
+      else obj.properties[key] = String(value);
+      this.cb.onEdit();
+    };
+    const num = (key, labelKey, ph = '', step = '0.1') => {
+      const inp = el('input', {
+        type: 'number', step, value: obj.properties[key] ?? '', placeholder: ph,
+        onchange: () => set(key, inp.value),
+      });
+      return el('div', { class: 'field grow' }, el('label', { text: t(labelKey) }), inp);
+    };
+    const chk = (key, labelKey) => {
+      const c = el('input', { type: 'checkbox' });
+      c.checked = obj.properties[key] === '1' || obj.properties[key] === 'true';
+      c.onchange = () => set(key, c.checked ? '1' : '0');
+      return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
+    };
+    const sel = (key, labelKey, options, dflt = '') => {
+      const s = el('select', {}, ...options.map(([v, lk]) =>
+        el('option', { value: v, text: t(lk), selected: (obj.properties[key] ?? dflt) === v ? '' : null })));
+      s.onchange = () => set(key, s.value);
+      return el('div', { class: 'field' }, el('label', { text: t(labelKey) }), s);
+    };
+    return { set, num, chk, sel };
+  }
+
+  _section(kind, titleKey, ...children) {
+    const color = KIND_COLORS[kind] || KIND_COLORS.generic;
+    return el('div', { class: 'smart-box', style: `border-left-color:${color}` },
+      el('h4', { style: `color:${color}`, text: t(titleKey) }),
+      ...children.filter(Boolean));
+  }
+
+  _bombSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('bomb', 'sec.bomb',
+      el('div', { class: 'row gap' },
+        num('BlastRadius', 'prop.blastRadius', '5', '0.5'),
+        num('BlastPower', 'prop.blastPower', '4000', '100')),
+      num('GravityScale', 'prop.gravity', '0', '0.1'),
+      chk('Draggable', 'prop.draggable'));
+  }
+
+  _fanSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('fan', 'sec.fan',
+      chk('VacuumOn', 'prop.fanOn'),
+      el('div', { class: 'row gap' },
+        num('VacuumMaxForce', 'prop.fanStrength', '100', '10'),
+        num('VacuumMaxD', 'prop.fanRange', '', '1')),
+      el('div', { class: 'row gap' },
+        num('VacuumMinAngle', 'prop.fanAngleMin', '', '5'),
+        num('VacuumMaxAngle', 'prop.fanAngleMax', '', '5')));
+  }
+
+  _balloonSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('balloon', 'sec.balloon',
+      num('GravityScale', 'prop.buoyancy', '-1', '0.1'),
+      num('VelDamping', 'prop.damping', '0.99', '0.01'),
+      chk('Draggable', 'prop.draggable'));
+  }
+
+  _connSlots(obj, prefix) {
+    const out = [];
+    for (let i = 0; obj.properties[prefix + i] !== undefined; i++) out.push(i);
+    return out;
+  }
+
+  _switchSection(obj) {
+    const { sel } = this._controls(obj);
+    const slots = this._connSlots(obj, 'ConnectedObject');
+    return this._section('switch', 'sec.switch',
+      sel('SwitchType', 'prop.switchType',
+        [['Flip', 'prop.switchFlip'], ['Momentary', 'prop.switchMomentary']], 'Flip'),
+      el('div', { class: 'field' },
+        el('label', { text: t('conn.title') }),
+        ...slots.map((i) => this._connPicker(obj, 'ConnectedObject' + i, t('conn.controls', { n: i }))),
+        el('button', {
+          class: 'btn small', text: '+ ' + t('conn.add'),
+          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedObject' + slots.length),
+        })));
+  }
+
+  _converterSection(obj) {
+    const { sel, num } = this._controls(obj);
+    const slots = this._connSlots(obj, 'ConnectedSpout');
+    return this._section('converter', 'sec.converter',
+      sel('FluidType', 'prop.outputFluid',
+        [['Water', 'spout.f.water'], ['ContaminatedWater', 'spout.f.poison'], ['Lava', 'spout.f.ooze']], 'Water'),
+      el('div', { class: 'field' },
+        el('label', { text: t('conn.title') }),
+        ...slots.flatMap((i) => [
+          this._connPicker(obj, 'ConnectedSpout' + i, t('conn.output', { n: i })),
+          num('ConnectedSpoutProbability' + i, 'prop.probability', '100', '5'),
+        ]),
+        el('button', {
+          class: 'btn small', text: '+ ' + t('conn.add'),
+          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedSpout' + slots.length),
+        })),
+      this._connPicker(obj, 'ConnectedConverter', t('conn.converter')));
+  }
+
+  _ypipeSection(obj) {
+    const { sel } = this._controls(obj);
+    return this._section('ypipe', 'sec.ypipe',
+      sel('YSwitchPosition', 'prop.switchType', [['left', 'left'], ['right', 'right']], 'left'),
+      this._connPicker(obj, 'ConnectedYSwitchPort0', t('conn.switch')));
+  }
+
+  _brokenpipeSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('brokenpipe', 'sec.brokenpipe',
+      chk('Draggable', 'prop.draggable'),
+      num('GravityScale', 'prop.gravity', '0', '0.1'));
+  }
+
+  _teleportSection(obj) {
+    const { num } = this._controls(obj);
+    return this._section('teleport', 'sec.teleport',
+      this._connPicker(obj, 'ConnectedObject0', t('conn.exit')),
+      el('div', { class: 'row gap' },
+        num('TeleportWaitTime', 'prop.teleWait', '', '0.1'),
+        num('TeleportMoveTime', 'prop.teleTime', '', '0.1')));
+  }
+
+  _sprinklerSection(obj) {
+    const { num, sel } = this._controls(obj);
+    return this._section('sprinkler', 'sec.sprinkler',
+      el('div', { class: 'row gap' },
+        num('SprinklerWidth', 'prop.sprinkWidth', '8', '1'),
+        num('SprinklerSteps', 'prop.sprinkSteps', '', '1')),
+      sel('FluidType', 'prop.outputFluid',
+        [['Water', 'spout.f.water'], ['ContaminatedWater', 'spout.f.poison'], ['Lava', 'spout.f.ooze']], 'Water'),
+      el('div', { class: 'row gap' },
+        num('ParticlesPerSecond', 'spout.flow', '60', '1'),
+        num('NumberParticles', 'spout.limit', '-1', '1')));
+  }
+
+  _motorSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('motor', 'sec.motor',
+      chk('MotorOn', 'prop.motorOn'),
+      el('div', { class: 'row gap' },
+        num('MotorMoveSpeed', 'prop.moveSpeed', '1', '0.5'),
+        num('MotorWaitTime', 'prop.waitTime', '0', '0.1')),
+      chk('MotorPingPong', 'prop.pingPong'),
+      num('MotorTurnSpeed', 'prop.turnSpeed', '', '1'));
+  }
+
+  /** Physics quick controls, only for properties the object actually has. */
+  _genericPhysicsSection(obj) {
+    const { num, chk } = this._controls(obj);
+    const rows = [];
+    if (obj.properties.GravityScale !== undefined) rows.push(num('GravityScale', 'prop.gravity', '', '0.1'));
+    if (obj.properties.Draggable !== undefined) rows.push(chk('Draggable', 'prop.draggable'));
+    if (obj.properties.Interactive !== undefined) rows.push(chk('Interactive', 'prop.interactive'));
+    if (obj.properties.VelDamping !== undefined) rows.push(num('VelDamping', 'prop.damping', '', '0.01'));
+    if (!rows.length) return null;
+    return this._section('generic', 'sec.physics', ...rows);
+  }
+
+  /** One connection slot: current target, pick in level, disconnect. */
+  _connPicker(obj, propName, label) {
+    const val = obj.properties[propName] || '';
+    return el('div', { class: 'conn-row' },
+      el('span', { class: 'conn-label', text: label }),
+      el('span', { class: 'conn-value' + (val ? '' : ' none'), title: val || propName, text: val || t('conn.none') }),
+      el('button', { class: 'btn small', text: t('conn.pick'), onclick: () => this.cb.onPickConnection?.(obj, propName) }),
+      val
+        ? el('button', {
+            class: 'icon-btn', title: t('conn.clear'), html: '&times;',
+            onclick: () => { this.cb.push(); delete obj.properties[propName]; this.cb.onEdit(); this.render(); },
+          })
+        : null);
   }
 
   /** Friendly controls for spouts and drains: behavior, fluid, flow and a
@@ -411,7 +714,8 @@ export class Inspector {
       .map(([key, count]) => {
         const [r, g, b] = key.split(',').map(Number);
         const mat = nearestMaterial(r, g, b);
-        const exact = mat.rgb.join(',') === key;
+        // aliases (compression era color variants) count as exact matches
+        const exact = !!materialForColor(r, g, b);
         return el('div', { class: 'stat-row' },
           el('span', { class: 'swatch', style: `background: rgb(${key})` }),
           el('span', { class: 'stat-name', text: exact ? t('mat.' + mat.id) : `${t('mat.' + mat.id)}? (${key})` }),

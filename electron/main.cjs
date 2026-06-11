@@ -21,7 +21,7 @@ function buildMenu() {
       submenu: [
         { label: 'Open Game Files…', accelerator: 'CmdOrCtrl+O', click: () => openGameDialog() },
         { label: 'New Level…', accelerator: 'CmdOrCtrl+N', click: () => send('new-level') },
-        { label: 'Reopen Last Game Files', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('open-recent') },
+        { label: 'Continue Last Session', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('open-recent') },
         { type: 'separator' },
         { label: 'Save Level', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: () => send('save') },
         { label: 'Playtest on Device…', accelerator: 'F5', click: () => send('playtest') },
@@ -57,10 +57,11 @@ function buildMenu() {
         { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => send('zoom-out') },
         { label: 'Fit Level', accelerator: 'CmdOrCtrl+0', click: () => send('fit') },
         { type: 'separator' },
-        { label: 'Grid', type: 'checkbox', checked: false, click: () => send('toggle-grid') },
-        { label: 'Collision Shapes', type: 'checkbox', checked: false, click: () => send('toggle-collision') },
-        { label: 'Motor Paths', type: 'checkbox', checked: true, click: () => send('toggle-paths') },
-        { label: 'Smart Terrain Painting', type: 'checkbox', checked: true, click: () => send('toggle-smartrock') },
+        { id: 'menu-grid', label: 'Grid', type: 'checkbox', checked: false, click: () => send('toggle-grid') },
+        { id: 'menu-collision', label: 'Collision Shapes', type: 'checkbox', checked: false, click: () => send('toggle-collision') },
+        { id: 'menu-paths', label: 'Motor Paths', type: 'checkbox', checked: true, click: () => send('toggle-paths') },
+        { id: 'menu-conns', label: 'Connections', type: 'checkbox', checked: true, click: () => send('toggle-connections') },
+        { id: 'menu-smart', label: 'Smart Terrain Painting', type: 'checkbox', checked: true, click: () => send('toggle-smartrock') },
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { role: 'reload' },
@@ -115,6 +116,41 @@ async function openGameDialog() {
 
 ipcMain.handle('open-game', () => openGameDialog());
 
+// toolbar toggles mirror into the native View menu checkboxes
+ipcMain.on('menu-state', (_e, { id, checked }) => {
+  const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+  if (item) item.checked = !!checked;
+});
+
+// ---------------- session cache ----------------
+// The loaded APK is kept in userData so the next session starts in one click
+// instead of re-picking an 80 MB file.
+
+const cachePath = () => path.join(app.getPath('userData'), 'cached-game.apk');
+
+ipcMain.handle('cache-apk', async (_e, { name, data }) => {
+  const dest = cachePath();
+  fs.writeFileSync(dest, Buffer.from(data));
+  const meta = { name, size: data.byteLength ?? data.length, date: new Date().toISOString() };
+  fs.writeFileSync(dest + '.meta.json', JSON.stringify(meta));
+  return meta;
+});
+
+ipcMain.handle('cached-apk-meta', async () => {
+  const p = cachePath();
+  if (!fs.existsSync(p) || !fs.existsSync(p + '.meta.json')) return null;
+  try { return JSON.parse(fs.readFileSync(p + '.meta.json', 'utf8')); } catch { return null; }
+});
+
+ipcMain.handle('read-cached-apk', async () => {
+  const p = cachePath();
+  if (!fs.existsSync(p)) return null;
+  let name = 'cached-game.apk';
+  try { name = JSON.parse(fs.readFileSync(p + '.meta.json', 'utf8')).name || name; } catch { /* keep default */ }
+  const data = fs.readFileSync(p);
+  return { name, buffer: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) };
+});
+
 // ---------------- playtest pipeline ----------------
 // Receives the rebuilt APK bytes from the renderer, then: sign with
 // uber-apk-signer, adb connect (MuMu), install, and launch the game.
@@ -163,6 +199,12 @@ ipcMain.handle('playtest', async (_e, { apk, settings }) => {
     fs.writeFileSync(unsigned, Buffer.from(apk));
 
     if (!s.signerJar) throw new Error('Set the path to uber-apk-signer.jar in Settings first.');
+    if (!fs.existsSync(s.signerJar)) {
+      throw new Error(`uber-apk-signer.jar not found at ${s.signerJar}. Fix the path in Settings (the ? next to the field explains where to get it).`);
+    }
+    if (/[\\/]/.test(adb) && !fs.existsSync(adb)) {
+      throw new Error(`adb not found at ${adb}. Fix the path in Settings. MuMu ships it at C:\\Program Files\\Netease\\MuMuPlayer\\nx_device\\12.0\\shell\\adb.exe`);
+    }
     await run(java, ['-jar', s.signerJar, '--apks', unsigned, '--out', tmp, '--allowResign'], 'Signing APK');
     const signed = fs.readdirSync(tmp).map((f) => path.join(tmp, f))
       .find((f) => f.endsWith('.apk') && f !== unsigned && /signed/i.test(f));

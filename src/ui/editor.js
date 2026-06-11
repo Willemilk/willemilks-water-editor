@@ -32,6 +32,8 @@ export class Editor {
     this.showGrid = false;
     this.showCollision = false;
     this.showPaths = true;
+    this.showConnections = true;
+    this.pickObjectMode = null; // callback(obj) set while picking a connection target
 
     this.selected = null;
     this.hoverPathHandle = null; // {obj, index}
@@ -43,7 +45,16 @@ export class Editor {
 
     this._bind();
     this._resize();
-    new ResizeObserver(() => this._resize()).observe(canvas.parentElement);
+    this._resizeObs = new ResizeObserver(() => this._resize());
+    this._resizeObs.observe(canvas.parentElement);
+  }
+
+  /** Detach window-level listeners. Call before replacing the editor instance. */
+  dispose() {
+    window.removeEventListener('pointerup', this._onWinUp);
+    window.removeEventListener('keydown', this._onWinKey);
+    this._resizeObs?.disconnect();
+    if (this._raf) cancelAnimationFrame(this._raf);
   }
 
   setLevel(level) {
@@ -133,8 +144,10 @@ export class Editor {
     c.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
     c.addEventListener('pointerdown', (e) => this._onDown(e));
     c.addEventListener('pointermove', (e) => this._onMove(e));
-    window.addEventListener('pointerup', (e) => this._onUp(e));
-    window.addEventListener('keydown', (e) => this._onKey(e));
+    this._onWinUp = (e) => this._onUp(e);
+    this._onWinKey = (e) => this._onKey(e);
+    window.addEventListener('pointerup', this._onWinUp);
+    window.addEventListener('keydown', this._onWinKey);
   }
 
   _onWheel(e) {
@@ -146,6 +159,10 @@ export class Editor {
     const [ix, iy] = this.screenToImg(sx, sy);
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     this.zoom = Math.min(40, Math.max(0.5, this.zoom * factor));
+    // keep the pixel under the cursor anchored while zooming
+    this.panX = sx - ix * this.zoom;
+    this.panY = sy - iy * this.zoom;
+    this.events.onViewChanged?.(this.zoom);
     this.requestRender();
   }
 
@@ -175,6 +192,13 @@ export class Editor {
     // middle mouse / space-drag / right mouse = pan
     if (e.button === 1 || e.button === 2 || this._space) {
       this.dragging = { kind: 'pan', sx, sy, panX: this.panX, panY: this.panY };
+      return;
+    }
+
+    // connection picking mode: the next clicked object becomes the target
+    if (this.pickObjectMode && e.button === 0) {
+      const hit = await this._hitObject(sx, sy);
+      if (hit) this.pickObjectMode(hit);
       return;
     }
 
@@ -538,10 +562,34 @@ export class Editor {
       ctx.restore();
     }
 
+    // connections between objects (switch -> motor, converter -> spout, …)
+    const connections = [];
+    const connSources = new Set();
+    const connTargets = new Set();
+    if (this.showConnections) {
+      const byName = new Map(this.level.objects.map((o) => [o.name, o]));
+      for (const obj of this.level.objects) {
+        for (const [k, v] of Object.entries(obj.properties)) {
+          if (!k.startsWith('Connected') || !v) continue;
+          const target = byName.get(v);
+          if (!target || target === obj) continue;
+          const kind = k.startsWith('ConnectedSpout') ? 'spout' : k.startsWith('ConnectedYSwitch') ? 'ypipe' : 'obj';
+          connections.push({ from: obj, to: target, kind });
+          connSources.add(obj);
+          connTargets.add(target);
+        }
+      }
+    }
+
     // objects
     for (const obj of this.level.objects) {
       this._drawObject(ctx, obj);
+      if (connSources.has(obj) || connTargets.has(obj)) {
+        this._drawConnDot(ctx, obj, connSources.has(obj));
+      }
     }
+
+    for (const c of connections) this._drawConnection(ctx, c);
 
     // room marker
     if (this.level.room) {
@@ -624,6 +672,50 @@ export class Editor {
         ctx.stroke();
       }
     }
+    ctx.restore();
+  }
+
+  /** Dashed arrow from a controlling object to its target. */
+  _drawConnection(ctx, { from, to, kind }) {
+    const [x0, y0] = this.worldToScreen(from.x, from.y);
+    const [x1, y1] = this.worldToScreen(to.x, to.y);
+    const color = kind === 'spout' ? '#a78bfa' : kind === 'ypipe' ? '#5eead4' : '#2ea7ff';
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.8;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    const a = Math.atan2(y1 - y0, x1 - x0);
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - 9 * Math.cos(a - 0.38), y1 - 9 * Math.sin(a - 0.38));
+    ctx.lineTo(x1 - 9 * Math.cos(a + 0.38), y1 - 9 * Math.sin(a + 0.38));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** Small corner dot: blue = controls something, orange = is controlled. */
+  _drawConnDot(ctx, obj, outgoing) {
+    const vis = this.visualCache.get((obj.filename || '').toLowerCase());
+    const [ox, oy] = this.worldToScreen(obj.x, obj.y);
+    const b = vis?.bboxPx || { maxX: 6, minY: -6 };
+    const x = ox + b.maxX * this.zoom;
+    const y = oy + b.minY * this.zoom;
+    ctx.save();
+    ctx.fillStyle = outgoing ? '#2ea7ff' : '#ffb454';
+    ctx.strokeStyle = '#0b0f17';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 

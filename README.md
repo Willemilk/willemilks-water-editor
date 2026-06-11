@@ -58,11 +58,25 @@ works in any browser. Everything is local. Nothing gets uploaded anywhere.
   signature and keeps resources.arsc uncompressed, which is what prevents the native crash
 - Setup once in Settings: the path to uber-apk-signer.jar and adb. Java must be installed.
 
-**Spout quick editor**
-- Select any spout or drain and get friendly dropdowns instead of raw properties:
-  behavior (always running, starts when touched, drain, drain and spout), fluid
-  (water, poison water, ooze), flow rate, particle limit and a simple on/off interval timer
-- It writes the exact properties the game reads (SpoutType, FluidType, Timer0/1 and friends)
+**Smart properties for every object**
+- Every interactive object gets a friendly quick editor instead of raw key/value pairs:
+  spouts and drains (behavior, fluid, flow, interval timer), bombs (blast radius and force),
+  fans (strength, range, cone angles), balloons (buoyancy, drag), switches (flip or momentary),
+  converters (output fluid, probabilities), Y pipes, teleporters (exit portal, timing),
+  sprinklers (width, steps, fluid), moving platforms (speed, waypoint pause, ping pong)
+  and broken pipes — it writes the exact properties the game reads
+- The raw property editor is still there, one fold below, under "Advanced properties"
+- Copy any object's properties as JSON, or apply them to every object of the same kind at once
+
+**Visual connection system**
+- Switches, converters, Y pipes and teleporters connect to the objects they control:
+  the canvas draws dashed arrows for every connection (toggleable overlay)
+- Click "Pick in level" in the inspector, then click any object on the canvas to wire it up
+- Objects with connections get a small corner dot: blue controls something, orange is controlled
+
+**Session resume (desktop app)**
+- The app caches your game files and reopens the level you were working on:
+  one click on "Continue last session" and you are back where you left off
 
 **Four languages**
 - English, Nederlands, Español and 中文, switchable in Settings

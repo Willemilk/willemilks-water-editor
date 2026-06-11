@@ -14,6 +14,8 @@ import { t, getPref, setPref, setLang, currentLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
 
+const APP_VERSION = typeof __APP_VERSION__ === 'undefined' ? 'dev' : __APP_VERSION__;
+
 const state = {
   vfs: null,
   resolver: null,
@@ -36,18 +38,17 @@ function renderWelcome(error = '') {
           el('p', { class: 'drop-title', text: t('welcome.dropTitle') }),
           el('p', { class: 'muted small', text: t('welcome.dropSub') })
         ),
-        el('div', { class: 'welcome-actions' },
-          el('button', { class: 'btn primary', text: t('welcome.chooseZip'), onclick: () => fileInput.click() }),
-          el('button', { class: 'btn', text: t('welcome.chooseFolder'), onclick: () => folderInput.click() }),
-          window.native?.isApp && getPref('lastGamePath')
-            ? el('button', { class: 'btn', text: t('welcome.reopenLast'), onclick: openRecentGame })
-            : null
+        el('div', { class: 'welcome-actions', id: 'welcome-actions' },
+          el('button', { class: 'btn primary', id: 'btn-choose-zip', text: t('welcome.chooseZip'), onclick: () => fileInput.click() }),
+          el('button', { class: 'btn', text: t('welcome.chooseFolder'), onclick: () => folderInput.click() })
         ),
         error ? el('p', { class: 'error', text: error }) : null,
         el('div', { class: 'welcome-foot' },
           el('p', { class: 'muted small', text: t('welcome.tip') }),
           el('button', { class: 'btn ghost small', text: t('settings.title'), onclick: showSettings })
-        )
+        ),
+        el('p', { class: 'muted small credits', text: t('welcome.credits') }),
+        el('span', { class: 'version-tag', text: 'v' + APP_VERSION })
       )
     )
   );
@@ -68,21 +69,43 @@ function renderWelcome(error = '') {
     const f = e.dataTransfer.files[0];
     if (f) ingestFromFile(f);
   });
+
+  hydrateContinueButton();
 }
 
-/** Single entry for zip/apk files; remembers the path in the app for reopening. */
 function ingestFromFile(f) {
-  if (window.native?.isApp && f.path) setPref('lastGamePath', f.path);
   ingest(() => loadFromZipFile(f, setBusy));
 }
 
-async function openRecentGame() {
-  const p = getPref('lastGamePath');
-  if (!p) return toast(t('toast.noRecent'), 'err');
+/** When the desktop app has cached game files, offer a one click resume. */
+async function hydrateContinueButton() {
+  if (!window.native?.cachedApkMeta) return;
   try {
-    const { name, buffer } = await window.native.readFile(p);
-    ingest(() => loadFromZipFile(new File([buffer], name), setBusy));
+    const meta = await window.native.cachedApkMeta();
+    if (!meta) return;
+    const actions = document.getElementById('welcome-actions');
+    if (!actions) return;
+    document.getElementById('btn-choose-zip')?.classList.remove('primary');
+    actions.prepend(el('button', {
+      class: 'btn primary', text: '▶ ' + t('welcome.continue'),
+      title: t('welcome.cachedNote'), onclick: continueLastSession,
+    }));
+    const last = getPref('lastLevel');
+    const parts = [meta.name, (meta.size / 1048576).toFixed(1) + ' MB'];
+    if (last) parts.push(last);
+    actions.after(el('p', { class: 'muted small continue-note', text: parts.join(' · ') }));
+  } catch { /* cache unavailable */ }
+}
+
+async function continueLastSession() {
+  if (!window.native?.readCachedApk) return toast(t('toast.noRecent'), 'err');
+  try {
+    setBusy('Loading cached game files…');
+    const res = await window.native.readCachedApk();
+    if (!res) { setBusy(null); return toast(t('toast.noRecent'), 'err'); }
+    ingest(() => loadFromZipFile(new File([res.buffer], res.name), setBusy));
   } catch {
+    setBusy(null);
     toast(t('toast.noRecent'), 'err');
   }
 }
@@ -127,6 +150,15 @@ async function ingest(loader) {
     setBusy(null);
     renderEditor();
     toast(`Loaded ${state.levels.length} levels from ${state.vfs.sourceName}`, 'ok');
+    // desktop app: cache the APK in the background so the next session is one click
+    if (window.native?.cacheApk && state.vfs.sourceApk) {
+      const { name, data } = state.vfs.sourceApk;
+      setTimeout(() => window.native.cacheApk(name, data).catch(() => {}), 400);
+    }
+    // reopen the level you were working on last time
+    const last = getPref('lastLevel');
+    const entry = last ? state.levels.find((l) => l.name === last) : null;
+    if (entry) openLevel(entry);
     if (shouldShowTutorial()) setTimeout(startTutorial, 350);
   } catch (err) {
     setBusy(null);
@@ -180,21 +212,28 @@ function renderEditor() {
               el('span', { class: 'muted small', id: 'brush-val', text: '1' })
             ),
             el('div', { class: 'tool-group' },
-              toggleBtn(t('toggle.grid'), 'btn-grid', (on) => { state.editor.showGrid = on; state.editor.requestRender(); }),
-              toggleBtn(t('toggle.collision'), 'btn-coll', (on) => { state.editor.showCollision = on; state.editor.requestRender(); }),
-              toggleBtn(t('toggle.paths'), 'btn-paths', (on) => { state.editor.showPaths = on; state.editor.requestRender(); }, true),
+              toggleBtn(t('toggle.grid'), 'btn-grid', (on) => { state.editor.showGrid = on; state.editor.requestRender(); }, false, 'menu-grid'),
+              toggleBtn(t('toggle.collision'), 'btn-coll', (on) => { state.editor.showCollision = on; state.editor.requestRender(); }, false, 'menu-collision'),
+              toggleBtn(t('toggle.paths'), 'btn-paths', (on) => { state.editor.showPaths = on; state.editor.requestRender(); }, true, 'menu-paths'),
+              toggleBtn(t('conn.show'), 'btn-conns', (on) => { state.editor.showConnections = on; state.editor.requestRender(); }, true, 'menu-conns'),
               el('button', { class: 'btn small', text: t('btn.fit'), title: t('btn.fit') + ' (0)', onclick: () => state.editor.fitView() })
             )
           ),
           el('div', { class: 'mat-bar', id: 'material-bar' }),
           el('div', { class: 'canvas-wrap', id: 'canvas-wrap' },
             el('canvas', { id: 'editor-canvas' }),
+            el('div', { class: 'connection-banner hidden', id: 'connection-banner' },
+              el('span', { text: t('conn.banner') }),
+              el('button', { class: 'btn small', text: t('btn.cancel'), onclick: () => cancelConnectionPick() })),
             el('div', { class: 'canvas-empty', id: 'canvas-empty' },
-              el('p', { text: '←' }),
+              el('div', { class: 'canvas-watermark' }, logoSvg(110)),
+              el('p', { text: t('canvas.openHint') }),
+              el('p', { class: 'small', text: t('canvas.newHint') }),
               el('button', { class: 'btn', text: '+ ' + t('btn.newLevel'), onclick: newLevel }))
           ),
           el('div', { class: 'statusbar', id: 'statusbar' }, el('span', { id: 'status-pos' }), el('span', { id: 'status-mat' }),
-            el('span', { class: 'grow' }), el('span', { class: 'muted small', id: 'status-zoom' }),
+            el('span', { class: 'grow' }),
+            el('span', { class: 'muted small', id: 'status-zoom', title: t('btn.fit') + ' (0)', onclick: () => state.editor?.fitView() }),
             el('span', { class: 'muted small', text: t('status.pan') }))
         ),
         // right inspector
@@ -206,6 +245,7 @@ function renderEditor() {
 
   // components
   const canvas = document.getElementById('editor-canvas');
+  state.editor?.dispose?.(); // drop the old instance's window listeners on reload
   state.editor = new Editor(canvas, state.resolver, {
     onSelect: (obj) => { inspector.setObject(obj); },
     onViewChanged: (zoom) => {
@@ -252,6 +292,20 @@ function renderEditor() {
     getLevel: () => state.level,
     push: () => state.level?.pushUndo(),
     onEdit: () => { state.editor.requestRender(); updateUndoButtons(); markDirty(); },
+    onPickConnection: (obj, propName) => {
+      // next click on an object in the canvas wires it into this property
+      state.editor.pickObjectMode = (hit) => {
+        if (hit === obj) return;
+        state.level.pushUndo();
+        obj.properties[propName] = hit.name;
+        cancelConnectionPick();
+        inspector.render();
+        state.editor.requestRender();
+        markDirty();
+        toast(t('conn.done', { name: hit.name }), 'ok', 2200);
+      };
+      document.getElementById('connection-banner')?.classList.remove('hidden');
+    },
     onDelete: (obj) => {
       state.level.pushUndo();
       state.level.removeObject(obj);
@@ -290,26 +344,41 @@ function renderEditor() {
     markDirty();
   }, { capture: true });
 
+  // named handlers so reloading game files never stacks duplicate listeners
+  window.removeEventListener('keydown', onGlobalKeys);
   window.addEventListener('keydown', onGlobalKeys);
-  window.addEventListener('keyup', (e) => { if (e.code === 'Space') state.editor.setSpace(false); });
-  window.addEventListener('beforeunload', (e) => {
-    if (state.level?.dirty) { e.preventDefault(); e.returnValue = ''; }
-  });
+  window.removeEventListener('keyup', onGlobalKeyUp);
+  window.addEventListener('keyup', onGlobalKeyUp);
+  window.removeEventListener('beforeunload', onBeforeUnload);
+  window.addEventListener('beforeunload', onBeforeUnload);
 }
 
-import { nearestMaterial as _nm } from './data/materials.js';
+function onGlobalKeyUp(e) {
+  if (e.code === 'Space') state.editor?.setSpace(false);
+}
+
+function onBeforeUnload(e) {
+  if (state.level?.dirty) { e.preventDefault(); e.returnValue = ''; }
+}
+
+function cancelConnectionPick() {
+  if (state.editor) state.editor.pickObjectMode = null;
+  document.getElementById('connection-banner')?.classList.add('hidden');
+}
+
+import { nearestMaterial as _nm, materialForColor as _mfc } from './data/materials.js';
 const matApi = { nearestMaterial: _nm };
 
 function pixelLabel(px) {
-  const m = _nm(px[0], px[1], px[2]);
-  const exact = m.rgb[0] === px[0] && m.rgb[1] === px[1] && m.rgb[2] === px[2];
-  return exact ? m.name : `rgb(${px.join(',')})`;
+  const exact = _mfc(px[0], px[1], px[2]); // includes the known color aliases
+  return exact ? t('mat.' + exact.id) : `rgb(${px.join(',')})`;
 }
 
 function onGlobalKeys(e) {
   if (e.target.matches('input, textarea, select')) return;
   if (e.code === 'Space') { state.editor?.setSpace(true); e.preventDefault(); }
   if (e.key === 'Escape') {
+    if (state.editor?.pickObjectMode) { cancelConnectionPick(); return; }
     if (state.placing) { state.placing = null; toast(t('btn.cancel'), 'info', 1000); }
     else if (state.editor?.selected) { state.editor.selected = null; state.inspector?.setObject(null); state.editor.requestRender(); }
     document.querySelector('.export-menu')?.remove();
@@ -324,25 +393,31 @@ function onGlobalKeys(e) {
   if (e.key.toLowerCase() === 'g') document.getElementById('btn-grid')?.click();
 }
 
+function toolIcon(paths) {
+  const span = el('span', { class: 'tool-icon' });
+  span.innerHTML = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  return span;
+}
+
 function buildTools() {
   const defs = [
-    [TOOLS.SELECT, 'Select / move', 'V', '🖱️'],
-    [TOOLS.PENCIL, 'Pencil (paint terrain)', 'B', '✏️'],
-    [TOOLS.ERASER, 'Eraser (paint empty)', 'E', '🧽'],
-    [TOOLS.LINE, 'Line', 'L', '📏'],
-    [TOOLS.RECT, 'Rectangle (filled)', 'R', '▭'],
-    [TOOLS.FILL, 'Fill bucket', 'F', '🪣'],
-    [TOOLS.PICKER, 'Material picker', 'I', '💉'],
+    [TOOLS.SELECT, t('tool.select'), '<path d="M3.5 2.2v10l2.6-2.3 1.6 4 1.8-.7-1.6-3.9h3.7z"/>'],
+    [TOOLS.PENCIL, t('tool.pencil'), '<path d="M11.2 2.3l2.5 2.5L5.2 13.3l-3.2.7.7-3.2z"/><path d="M9.4 4.1l2.5 2.5"/>'],
+    [TOOLS.ERASER, t('tool.eraser'), '<path d="M9.3 2.9l3.8 3.8-6 6H4.3L2.2 10.6z"/><path d="M6.6 5.6l3.8 3.8"/><path d="M9 13h4.8"/>'],
+    [TOOLS.LINE, t('tool.line'), '<path d="M2.5 13.5l11-11"/><circle cx="2.5" cy="13.5" r="1"/><circle cx="13.5" cy="2.5" r="1"/>'],
+    [TOOLS.RECT, t('tool.rect'), '<rect x="2.5" y="3.5" width="11" height="9" rx="1"/>'],
+    [TOOLS.FILL, t('tool.fill'), '<path d="M7.3 2.2l5.2 5.2-4.4 4.4a1.4 1.4 0 0 1-2 0L3 8.7a1.4 1.4 0 0 1 0-2z"/><path d="M12.9 10.8s1.4 1.6 1.4 2.5a1.4 1.4 0 0 1-2.8 0c0-.9 1.4-2.5 1.4-2.5z"/>'],
+    [TOOLS.PICKER, t('tool.picker'), '<path d="M9.8 4.2l2-2a1.4 1.4 0 0 1 2 2l-2 2"/><path d="M10.8 5.2l-6.3 6.3-.6 2.6 2.6-.6 6.3-6.3z"/>'],
   ];
   const wrap = document.getElementById('toolbar-tools');
   wrap.replaceChildren(
-    ...defs.map(([tool, title, key, icon]) =>
+    ...defs.map(([tool, title, icon]) =>
       el('button', {
         class: 'tool-btn' + (state.editor.tool === tool ? ' active' : ''),
         'data-tool': tool,
-        title: `${title} (${key})`,
+        title,
         onclick: () => setTool(tool),
-      }, el('span', { text: icon }))
+      }, toolIcon(icon))
     )
   );
 }
@@ -363,11 +438,14 @@ function renderMaterials() {
   });
 }
 
-function toggleBtn(label, id, onToggle, initial = false) {
+function toggleBtn(label, id, onToggle, initial = false, menuId = null) {
   const b = el('button', { class: 'btn small toggle' + (initial ? ' on' : ''), id, text: label });
   b.addEventListener('click', () => {
     b.classList.toggle('on');
-    onToggle(b.classList.contains('on'));
+    const on = b.classList.contains('on');
+    onToggle(on);
+    // keep the native View menu checkbox in step with the toolbar
+    if (menuId) window.native?.syncMenu?.(menuId, on);
   });
   return b;
 }
@@ -388,6 +466,7 @@ async function openLevel(entry) {
     state.level = level;
     document.getElementById('canvas-empty').style.display = 'none';
     document.getElementById('level-title').textContent = '· ' + entry.name;
+    document.querySelector('.topbar')?.classList.remove('dirty');
     state.levelBrowser.setActive(entry.name);
     state.editor.setLevel(level);
     state.inspector.setObject(null);
@@ -429,6 +508,7 @@ function markDirty() {
   if (!state.level) return;
   state.level.dirty = true;
   document.getElementById('level-title').textContent = '· ' + state.level.name + ' •';
+  document.querySelector('.topbar')?.classList.add('dirty');
 }
 
 function updateUndoButtons() {
@@ -445,6 +525,7 @@ function saveCurrent() {
     state.levelBrowser.setActive(state.level.name);
   }
   document.getElementById('level-title').textContent = '· ' + state.level.name;
+  document.querySelector('.topbar')?.classList.remove('dirty');
   toast(t('toast.saved', { name: state.level.name }), 'ok');
 }
 
@@ -535,7 +616,10 @@ function wireNative() {
         break;
       }
       case 'new-level': if (state.vfs) newLevel(); else toast(t('toast.loadFirst'), 'err'); break;
+      case 'open-recent': continueLastSession(); break;
       case 'save': saveCurrent(); break;
+      case 'settings': showSettings(); break;
+      case 'playtest': runPlaytest(); break;
       case 'export-level-zip': exportLevelZip(); break;
       case 'export-xml': exportXml(); break;
       case 'export-png': exportPng(); break;
@@ -550,7 +634,8 @@ function wireNative() {
       case 'toggle-grid': document.getElementById('btn-grid')?.click(); break;
       case 'toggle-collision': document.getElementById('btn-coll')?.click(); break;
       case 'toggle-paths': document.getElementById('btn-paths')?.click(); break;
-      case 'toggle-smartrock': { const on = !getPref('smartTerrain', true); setPref('smartTerrain', on); if (state.editor) state.editor.smartTerrain = on; toast(t('settings.smart') + ': ' + (on ? 'ON' : 'OFF'), 'info', 1800); break; }
+      case 'toggle-connections': document.getElementById('btn-conns')?.click(); break;
+      case 'toggle-smartrock': { const on = !getPref('smartTerrain', true); setPref('smartTerrain', on); if (state.editor) state.editor.smartTerrain = on; window.native?.syncMenu?.('menu-smart', on); toast(t('settings.smart') + ': ' + (on ? 'ON' : 'OFF'), 'info', 1800); break; }
       case 'tutorial': if (state.editor) startTutorial(); else toast('Load game files first', 'err'); break;
       case 'shortcuts': showShortcuts(); break;
     }
@@ -611,17 +696,26 @@ function showSettings() {
   smart.checked = getPref('smartTerrain', true);
 
   const fields = {};
-  const pathField = (key, labelKey, browseFilters) => {
+  const pathField = (key, labelKey, browseFilters, helpKey = null) => {
     fields[key] = el('input', { type: 'text', value: pt[key] });
+    const help = helpKey ? el('div', { class: 'field-help', text: t(helpKey) }) : null;
     return el('div', { class: 'field' },
-      el('label', { text: t(labelKey) }),
+      el('div', { class: 'field-label-row' },
+        el('label', { text: t(labelKey) }),
+        helpKey
+          ? el('button', {
+              class: 'help-btn', type: 'button', text: '?', title: t('help.show'),
+              onclick: (e) => { e.preventDefault(); help.classList.toggle('visible'); },
+            })
+          : null),
       el('div', { class: 'row gap' }, fields[key],
         isApp && browseFilters
           ? el('button', { class: 'btn small', text: t('btn.browse'), onclick: async () => {
               const p = await window.native.pickPath(t(labelKey), browseFilters);
               if (p) fields[key].value = p;
             } })
-          : null));
+          : null),
+      help);
   };
 
   const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
@@ -636,10 +730,10 @@ function showSettings() {
       el('div', { class: 'sep' }),
       el('h4', { text: t('settings.playtest') }),
       isApp ? null : el('p', { class: 'muted small', text: t('settings.webNote') }),
-      pathField('signerJar', 'settings.signer', [{ name: 'Java archive', extensions: ['jar'] }]),
-      pathField('adbPath', 'settings.adb', [{ name: 'adb', extensions: ['exe', '*'] }]),
-      pathField('deviceAddr', 'settings.device', null),
-      pathField('javaPath', 'settings.java', [{ name: 'java', extensions: ['exe', '*'] }]),
+      pathField('signerJar', 'settings.signer', [{ name: 'Java archive', extensions: ['jar'] }], 'help.signer'),
+      pathField('adbPath', 'settings.adb', [{ name: 'adb', extensions: ['exe', '*'] }], 'help.adb'),
+      pathField('deviceAddr', 'settings.device', null, 'help.device'),
+      pathField('javaPath', 'settings.java', [{ name: 'java', extensions: ['exe', '*'] }], 'help.java'),
       pathField('packageName', 'settings.pkg', null),
       el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
         el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
@@ -649,6 +743,7 @@ function showSettings() {
   function save() {
     setPref('smartTerrain', smart.checked);
     if (state.editor) state.editor.smartTerrain = smart.checked;
+    window.native?.syncMenu?.('menu-smart', smart.checked);
     setPref('playtest', Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])));
     const newLang = langSel.value;
     overlay.remove();
@@ -700,6 +795,8 @@ async function runPlaytest() {
   }
 
   ptRunning = true;
+  const ptBtn = document.getElementById('btn-playtest');
+  if (ptBtn) { ptBtn.disabled = true; ptBtn.textContent = t('pt.btnBusy'); }
   try {
     // rebuild off the UI thread tick so the modal paints first
     await new Promise((r) => setTimeout(r, 30));
@@ -716,5 +813,6 @@ async function runPlaytest() {
   } finally {
     ptRunning = false;
     closeBtn.disabled = false;
+    if (ptBtn) { ptBtn.disabled = false; ptBtn.textContent = '▶ ' + t('btn.playtest'); }
   }
 }

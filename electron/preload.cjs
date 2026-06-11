@@ -26,4 +26,19 @@ contextBridge.exposeInMainWorld('native', {
     const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
     return ipcRenderer.invoke('save-file', { defaultName, data: buf });
   },
+  /** Keep a native menu checkbox in sync with the in app toolbar state. */
+  syncMenu(id, checked) {
+    ipcRenderer.send('menu-state', { id, checked });
+  },
+  /** Store the loaded APK in userData so the next session resumes in one click. */
+  cacheApk(name, data) {
+    const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
+    return ipcRenderer.invoke('cache-apk', { name, data: buf });
+  },
+  cachedApkMeta() {
+    return ipcRenderer.invoke('cached-apk-meta');
+  },
+  readCachedApk() {
+    return ipcRenderer.invoke('read-cached-apk');
+  },
 });

@@ -22,6 +22,8 @@ export const MATERIAL_ALIASES = {
   '254,234,0': 'room',
   '255,235,18': 'room',
   '43,34,254': 'water',
+  '41,41,41': 'rock_sh',
+  '72,72,72': 'rock',
 };
 
 export const DEFAULT_LEVEL_WIDTH = 90;
