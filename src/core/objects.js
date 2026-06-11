@@ -1,7 +1,7 @@
 // Resolves the full rendering chain for game objects:
 //   level XML  ->  /Objects/*.hs  ->  /Sprites/*.sprite  ->  /Textures/*.imagelist  ->  atlas .webp/.png
 // Everything is cached. Browsers decode the webp atlases natively.
-import { GRID_TO_PX } from './coords.js';
+import { GRID_TO_PX, degToRad } from './coords.js';
 
 export class ObjectResolver {
   constructor(vfs) {
@@ -164,8 +164,13 @@ export class ObjectResolver {
     for (const s of out) {
       const cx = s.pos[0] * GRID_TO_PX;
       const cy = -s.pos[1] * GRID_TO_PX;
-      const r = Math.hypot(s.wPx, s.hPx) / 2; // rotation-safe radius
-      grow(cx - r, cy - r); grow(cx + r, cy + r);
+      // tight axis-aligned box of this sprite's wPx x hPx rect rotated by its own angle
+      // (a hypot/2 "bounding circle" hugely over-sizes long thin sprites like pipes)
+      const cos = Math.abs(Math.cos(degToRad(s.angle)));
+      const sin = Math.abs(Math.sin(degToRad(s.angle)));
+      const hw = (s.wPx * cos + s.hPx * sin) / 2;
+      const hh = (s.wPx * sin + s.hPx * cos) / 2;
+      grow(cx - hw, cy - hh); grow(cx + hw, cy + hh);
     }
     if (!out.length) {
       for (const shape of hs.shapes) {

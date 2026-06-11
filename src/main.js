@@ -389,6 +389,11 @@ function onGlobalKeys(e) {
   if (e.key === 'F5' && window.native?.isApp) { e.preventDefault(); runPlaytest(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveCurrent(); }
   if (!state.editor || e.ctrlKey || e.metaKey) return;
+  if (e.key.toLowerCase() === 'r' && state.editor.tool === TOOLS.SELECT && state.editor.selected) {
+    e.preventDefault();
+    state.editor.rotateSelected(45);
+    return;
+  }
   const map = { v: TOOLS.SELECT, b: TOOLS.PENCIL, e: TOOLS.ERASER, l: TOOLS.LINE, r: TOOLS.RECT, f: TOOLS.FILL, i: TOOLS.PICKER };
   const t = map[e.key.toLowerCase()];
   if (t) setTool(t);
@@ -586,8 +591,10 @@ const SHORTCUTS = [
   ['V', 'Select / move'], ['B', 'Pencil'], ['E', 'Eraser'], ['L', 'Line'], ['R', 'Rectangle'],
   ['F', 'Fill bucket'], ['I', 'Material picker'], ['1 to 9', 'Brush size'], ['G', 'Toggle grid'],
   ['0', 'Fit level in view'], ['Scroll', 'Zoom'], ['Right mouse / Space', 'Pan'],
-  ['Shift while dragging', 'Snap object to half grid'], ['Arrow keys', 'Nudge selected object'],
+  ['Shift while dragging', 'Snap object to half grid'], ['Alt while dragging', 'Disable neighbor snapping'],
+  ['Arrow keys', 'Nudge selected object'], ['R (object selected)', 'Rotate object 45 degrees'],
   ['Ctrl+Z / Ctrl+Y', 'Undo / redo'], ['Ctrl+D', 'Duplicate object'], ['Del', 'Delete object'],
+  ['Ctrl+C / Ctrl+X / Ctrl+V', 'Copy / cut / paste object'],
   ['Ctrl+S', 'Save level'], ['Esc', 'Cancel placement'],
 ];
 

@@ -110,6 +110,7 @@ export class LevelBrowser {
     const q = this.filter.toLowerCase();
     const hadFocus = this.container.querySelector('.panel-search input') === document.activeElement;
     const caret = this.filter.length;
+    const prevScroll = this.container.querySelector('.scroll')?.scrollTop;
     const search = searchBox(t('search.levels', { n: this.levels.length }), this.filter,
       (e) => { this.filter = e.target.value; this.render(); });
     const restoreFocus = () => {
@@ -117,6 +118,10 @@ export class LevelBrowser {
       const input = search.querySelector('input');
       input.focus();
       input.setSelectionRange(caret, caret);
+    };
+    const restoreScroll = () => {
+      const scroller = this.container.querySelector('.scroll');
+      if (scroller && prevScroll) scroller.scrollTop = prevScroll;
     };
 
     if (q) {
@@ -133,6 +138,7 @@ export class LevelBrowser {
       this.container.replaceChildren(search,
         el('div', { class: 'list scroll' }, ...hits.map(({ item, pack }) => this._row(item, null, pack.title))));
       restoreFocus();
+      restoreScroll();
       return;
     }
 
@@ -157,6 +163,7 @@ export class LevelBrowser {
 
     this.container.replaceChildren(search, el('div', { class: 'scroll obj-groups' }, ...sections));
     restoreFocus();
+    restoreScroll();
   }
 }
 
@@ -258,7 +265,7 @@ export class ObjectBrowser {
       }
       const out = [];
       for (const [base, group] of byBase) {
-        if (group.length < 4) { out.push(...group.map(card)); continue; }
+        if (group.length < 10) { out.push(...group.map(card)); continue; }
         const key = 'stack:' + base;
         const open = this.openStacks.has(key);
         const img = el('img', { alt: '', loading: 'lazy' });
@@ -301,6 +308,7 @@ const KIND_COLORS = {
   spout: '#2ea7ff',
   bomb: '#ff5d5d',
   fan: '#3ddc84',
+  vacuum: '#06b6d4',
   balloon: '#19c8a8',
   switch: '#ffb454',
   converter: '#a78bfa',
@@ -314,7 +322,7 @@ const KIND_COLORS = {
 };
 
 const KIND_SECTION_KEY = {
-  bomb: 'sec.bomb', fan: 'sec.fan', balloon: 'sec.balloon', switch: 'sec.switch',
+  bomb: 'sec.bomb', fan: 'sec.fan', vacuum: 'sec.vacuum', balloon: 'sec.balloon', switch: 'sec.switch',
   converter: 'sec.converter', ypipe: 'sec.ypipe', brokenpipe: 'sec.brokenpipe',
   teleport: 'sec.teleport', sprinkler: 'sec.sprinkler', motor: 'sec.motor',
 };
@@ -340,11 +348,12 @@ export class Inspector {
     const type = (obj.type || '').toLowerCase();
     const p = obj.properties;
     if (/bomb|mine/.test(fn)) return 'bomb';
-    if (/fan|vacuum/.test(fn)) return 'fan';
+    if (/vacuum/.test(fn)) return 'vacuum';
+    if (/fan/.test(fn)) return 'fan';
     if (/balloon|bubble/.test(fn)) return 'balloon';
     if (/y[_-]?switch|pipe_y/.test(fn) || p.YSwitchPosition !== undefined) return 'ypipe';
     if (/switch|lever/.test(fn) || p.SwitchType !== undefined) return 'switch';
-    if (/converter/.test(fn) || p.ConnectedConverter !== undefined) return 'converter';
+    if (type === 'fluidconverter' || /converter/.test(fn)) return 'converter';
     if (/broken/.test(fn)) return 'brokenpipe';
     if (/teleport|portal/.test(fn)) return 'teleport';
     if (/sprinkler/.test(fn) || p.SprinklerWidth !== undefined) return 'sprinkler';
@@ -422,7 +431,7 @@ export class Inspector {
           el('summary', { text: t('sec.advanced') }),
           this._kvEditor(obj.properties, () => this.cb.onEdit(), obj)),
         el('div', { class: 'sep' }),
-        this._pathSection(obj)
+        this._pathSection(obj, kind)
       )
     );
   }
@@ -471,6 +480,7 @@ export class Inspector {
       case 'spout': return this._spoutSection(obj);
       case 'bomb': return this._bombSection(obj);
       case 'fan': return this._fanSection(obj);
+      case 'vacuum': return this._vacuumSection(obj);
       case 'balloon': return this._balloonSection(obj);
       case 'switch': return this._switchSection(obj);
       case 'converter': return this._converterSection(obj);
@@ -505,13 +515,13 @@ export class Inspector {
       c.onchange = () => set(key, c.checked ? '1' : '0');
       return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
     };
-    const sel = (key, labelKey, options, dflt = '') => {
+    const sel = (key, labelKey, options, dflt = '', labelParams = {}) => {
       // the game treats these values case insensitively (levels ship 'lava', 'Lava', …)
       const cur = String(obj.properties[key] ?? dflt).toLowerCase();
       const s = el('select', {}, ...options.map(([v, lk]) =>
         el('option', { value: v, text: t(lk), selected: cur === v.toLowerCase() ? '' : null })));
       s.onchange = () => set(key, s.value);
-      return el('div', { class: 'field' }, el('label', { text: t(labelKey) }), s);
+      return el('div', { class: 'field' }, el('label', { text: t(labelKey, labelParams) }), s);
     };
     // Draggable alone does nothing in game: the engine only reacts to touch
     // when Interactive is on too (and e.g. bomb.hs does not author it)
@@ -558,6 +568,18 @@ export class Inspector {
       el('div', { class: 'row gap' },
         num('VacuumMinAngle', 'prop.fanAngleMin', '', '5'),
         num('VacuumMaxAngle', 'prop.fanAngleMax', '', '5')));
+  }
+
+  _vacuumSection(obj) {
+    const { num, chk } = this._controls(obj);
+    return this._section('vacuum', 'sec.vacuum',
+      chk('VacuumOn', 'prop.vacuumOn'),
+      el('div', { class: 'row gap' },
+        num('VacuumMaxForce', 'prop.vacuumStrength', '100', '10'),
+        num('VacuumMaxD', 'prop.vacuumRange', '', '1')),
+      el('div', { class: 'row gap' },
+        num('VacuumMinAngle', 'prop.vacuumAngleMin', '', '5'),
+        num('VacuumMaxAngle', 'prop.vacuumAngleMax', '', '5')));
   }
 
   _balloonSection(obj) {
@@ -610,28 +632,28 @@ export class Inspector {
   }
 
   _converterSection(obj) {
-    const { sel, num } = this._controls(obj);
-    const slots = this._connSlots(obj, 'ConnectedSpout');
+    const { sel } = this._controls(obj);
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const isDynamic = (obj.properties.ConverterType || defaults.ConverterType || '').toLowerCase() === 'dynamic'
+      || obj.properties.FluidType0 !== undefined || defaults.FluidType0 !== undefined;
+
+    if (isDynamic) {
+      return this._section('converter', 'sec.converter',
+        el('p', { class: 'muted small', text: t('conv.dynamicHint') }),
+        ...[0, 1, 2, 3, 4, 5].map((i) => sel('FluidType' + i, 'conv.fluidSlot', FLUIDS, defaults['FluidType' + i] || 'Water', { n: i })));
+    }
     return this._section('converter', 'sec.converter',
-      sel('FluidType', 'prop.outputFluid', FLUIDS, 'Water'),
-      el('div', { class: 'field' },
-        el('label', { text: t('conn.title') }),
-        ...slots.flatMap((i) => [
-          this._connPicker(obj, 'ConnectedSpout' + i, t('conn.output', { n: i })),
-          num('ConnectedSpoutProbability' + i, 'prop.probability', '100', '5'),
-        ]),
-        el('button', {
-          class: 'btn small', text: '+ ' + t('conn.add'),
-          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedSpout' + slots.length),
-        })),
-      this._connPicker(obj, 'ConnectedConverter', t('conn.converter')));
+      el('p', { class: 'muted small', text: t('conv.staticHint') }),
+      sel('FluidType', 'prop.outputFluid', FLUIDS, defaults.FluidType || 'Water'));
   }
 
   _ypipeSection(obj) {
     const { sel } = this._controls(obj);
     return this._section('ypipe', 'sec.ypipe',
       sel('YSwitchPosition', 'prop.switchType', [['left', 'left'], ['right', 'right']], 'left'),
-      this._connPicker(obj, 'ConnectedYSwitchPort0', t('conn.switch')));
+      this._connPicker(obj, 'ConnectedYSwitchPort0', t('conn.switch')),
+      this._connPicker(obj, 'ConnectedConverter', t('conn.converter')),
+      el('p', { class: 'muted small', text: t('conv.ypipeHint') }));
   }
 
   _brokenpipeSection(obj) {
@@ -800,6 +822,9 @@ export class Inspector {
             el('div', { class: 'field grow' }, el('label', { text: t('spout.on') }), onTime),
             el('div', { class: 'field grow' }, el('label', { text: t('spout.off') }), offTime))
         : null,
+      el('div', { class: 'sep' }),
+      this._connPicker(obj, 'ConnectedConverter', t('conn.converter')),
+      el('p', { class: 'muted small', text: t('conv.spoutHint') }),
       el('div', { class: 'sep' })
     );
   }
@@ -869,14 +894,23 @@ export class Inspector {
     return wrap;
   }
 
-  _pathSection(obj) {
+  _pathSection(obj, kind) {
     const pts = obj.getPath();
+    // spouts and drains crash the game when given a motor path: the engine has
+    // no path follower for that object class. Block adding new waypoints, but
+    // still allow removing one to fix levels that already have this problem.
+    const blocked = kind === 'spout';
     const wrap = el('div', {});
     wrap.append(el('h4', { text: t('insp.motorPath') }));
-    if (pts.length) {
-      wrap.append(el('p', { class: 'muted small', text: 'Drag the yellow numbered handles in the level to move waypoints.' }));
+    if (blocked && !pts.length) {
+      wrap.append(el('p', { class: 'tag warn', text: t('insp.pathSpoutBlocked') }));
+      return wrap;
     }
-    const addBtn = el('button', {
+    if (pts.length) {
+      wrap.append(el('p', { class: 'muted small', text: t('insp.pathDragHint') }));
+      if (blocked) wrap.append(el('p', { class: 'tag warn', text: t('insp.pathSpoutWarn') }));
+    }
+    const addBtn = blocked ? null : el('button', {
       class: 'btn small', text: pts.length ? t('insp.addWaypoint') : t('insp.createPath'),
       onclick: () => {
         this.cb.push();
@@ -888,7 +922,7 @@ export class Inspector {
     });
     const removeBtn = pts.length
       ? el('button', {
-          class: 'btn small', text: 'Remove last',
+          class: 'btn small', text: t('insp.removeLast'),
           onclick: () => {
             this.cb.push();
             obj.setPath(pts.slice(0, -1));

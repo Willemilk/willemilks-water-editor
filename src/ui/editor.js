@@ -4,6 +4,8 @@
 import { GRID_TO_PX, worldToImg, imgToWorld, degToRad } from '../core/coords.js';
 import { getMaterial, rockFamilyRgbs } from '../data/materials.js';
 
+const SNAP_DIST = 0.5; // world units — neighbor edge/center snapping while dragging objects
+
 export const TOOLS = {
   SELECT: 'select',
   PENCIL: 'pencil',
@@ -311,6 +313,7 @@ export class Editor {
     } else if (d.kind === 'object') {
       let nx = wx + d.dx, ny = wy + d.dy;
       if (e.shiftKey) { nx = Math.round(nx * 2) / 2; ny = Math.round(ny * 2) / 2; }
+      else if (!e.altKey) [nx, ny] = this._snapToNeighbors(d.obj, nx, ny);
       d.obj.x = nx; d.obj.y = ny;
       d.moved = true;
       this.events.onChange?.('move');
@@ -383,6 +386,36 @@ export class Editor {
       this.requestRender();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && k === 'c' && this.selected) {
+      e.preventDefault();
+      this._clipboard = this.selected.clone();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && k === 'x' && this.selected) {
+      e.preventDefault();
+      this._clipboard = this.selected.clone();
+      this.level.pushUndo();
+      this.level.removeObject(this.selected);
+      this.selected = null;
+      this.events.onSelect?.(null);
+      this.events.onChange?.();
+      this.requestRender();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && k === 'v' && this._clipboard) {
+      e.preventDefault();
+      this.level.pushUndo();
+      const copy = this._clipboard.clone();
+      copy.name = this.level.uniqueObjectName(copy.name.replace(/\d+$/, ''));
+      copy.x += 2; copy.y -= 2;
+      this.level.objects.push(copy);
+      this.selected = copy;
+      this.events.onSelect?.(copy);
+      this.events.onChange?.();
+      this.preloadVisuals();
+      this.requestRender();
+      return;
+    }
     if ((k === 'delete' || k === 'backspace') && this.selected) {
       this.level.pushUndo();
       this.level.removeObject(this.selected);
@@ -406,6 +439,56 @@ export class Editor {
   }
 
   setSpace(down) { this._space = down; }
+
+  /** World-space axis-aligned bounding box of an object, optionally evaluated
+   *  at a candidate position (atX, atY) instead of its current x/y. Used for
+   *  neighbor snapping; rotation is exact at 0/90/180/270 and approximate
+   *  otherwise, which is fine for a snap heuristic. */
+  _objWorldBBox(obj, atX, atY) {
+    const vis = this.visualCache.get((obj.filename || '').toLowerCase());
+    const b = vis?.bboxPx || { minX: -6, minY: -6, maxX: 6, maxY: 6 };
+    const a = degToRad(-obj.angle);
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const corners = [[b.minX, b.minY], [b.maxX, b.minY], [b.maxX, b.maxY], [b.minX, b.maxY]]
+      .map(([lx, ly]) => [(lx * cos - ly * sin) / GRID_TO_PX, -(lx * sin + ly * cos) / GRID_TO_PX]);
+    const xs = corners.map((c) => c[0]);
+    const ys = corners.map((c) => c[1]);
+    const ox = atX ?? obj.x, oy = atY ?? obj.y;
+    return {
+      minX: ox + Math.min(...xs), maxX: ox + Math.max(...xs),
+      minY: oy + Math.min(...ys), maxY: oy + Math.max(...ys),
+    };
+  }
+
+  /** Nudge a dragged object's candidate position so its edges or center line
+   *  up with a nearby object's edges or center — pipes, decoration and
+   *  sprinklers snap together cleanly instead of leaving ugly gaps/overlaps. */
+  _snapToNeighbors(obj, nx, ny) {
+    const db = this._objWorldBBox(obj, nx, ny);
+    const dcx = (db.minX + db.maxX) / 2, dcy = (db.minY + db.maxY) / 2;
+    let bestDx = null, bestDy = null;
+    for (const other of this.level.objects) {
+      if (other === obj) continue;
+      const ob = this._objWorldBBox(other);
+      const ocx = (ob.minX + ob.maxX) / 2, ocy = (ob.minY + ob.maxY) / 2;
+      for (const d of [ob.minX - db.minX, ob.maxX - db.minX, ob.minX - db.maxX, ob.maxX - db.maxX, ocx - dcx]) {
+        if (Math.abs(d) < SNAP_DIST && (bestDx === null || Math.abs(d) < Math.abs(bestDx))) bestDx = d;
+      }
+      for (const d of [ob.minY - db.minY, ob.maxY - db.minY, ob.minY - db.maxY, ob.maxY - db.maxY, ocy - dcy]) {
+        if (Math.abs(d) < SNAP_DIST && (bestDy === null || Math.abs(d) < Math.abs(bestDy))) bestDy = d;
+      }
+    }
+    return [nx + (bestDx || 0), ny + (bestDy || 0)];
+  }
+
+  /** Rotate the selected object by `delta` degrees (e.g. 45 from the R key). */
+  rotateSelected(delta) {
+    if (!this.selected) return;
+    this.level.pushUndo();
+    this.selected.angle = ((this.selected.angle + delta) % 360 + 360) % 360;
+    this.events.onChange?.();
+    this.requestRender();
+  }
 
   /** Returns the rock family RGB set when smart painting applies, else null. */
   _smartFamily() {
