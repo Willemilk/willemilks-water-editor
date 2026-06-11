@@ -1,5 +1,10 @@
 # 💧 Willemilks Water Editor
 
+[![Latest release](https://img.shields.io/github/v/release/Willemilk/willemilks-water-editor?sort=semver)](https://github.com/Willemilk/willemilks-water-editor/releases/latest)
+[![Download](https://img.shields.io/github/downloads/Willemilk/willemilks-water-editor/total)](https://github.com/Willemilk/willemilks-water-editor/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)](https://github.com/Willemilk/willemilks-water-editor/releases/latest)
+
 A modern desktop level editor for **Where's My Water?**, built to do the one thing
 [Where's My Editor (WME)](https://github.com/wmw-modding/wheres-my-editor) can't: **edit the terrain.**
 
@@ -72,6 +77,20 @@ works in any browser. Everything is local. Nothing gets uploaded anywhere.
 - Create brand-new empty levels from scratch
 - Export: single level as zip, `.xml` only, `.png` only, or the **entire modified `assets/` tree** as
   one zip ready for repacking
+
+## Download
+
+Grab the latest Windows build from the
+**[Releases page](https://github.com/Willemilk/willemilks-water-editor/releases/latest)**:
+
+- **`WillemilksWaterEditor-Setup-x.y.z.exe`** — installer (Start menu + desktop shortcut, per-user, no admin needed)
+- **`WillemilksWaterEditor-Portable-x.y.z.exe`** — single file, run it anywhere, nothing installed
+
+Windows SmartScreen may show an "unknown publisher" warning the first time (the build isn't
+code-signed) — click *More info → Run anyway*.
+
+Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed; see
+[`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ## Getting started
 

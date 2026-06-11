@@ -1,7 +1,7 @@
 {
   "name": "willemilks-water-editor",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A modern level editor for Where's My Water? with full terrain painting. Runs as a desktop app (Electron) or in the browser.",
   "type": "module",
   "main": "electron/main.cjs",
@@ -33,6 +33,7 @@
   "build": {
     "appId": "com.willemilk.watereditor",
     "productName": "Willemilks Water Editor",
+    "copyright": "Copyright © 2026 Willemilk",
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -43,15 +44,33 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Willemilks Water Editor",
+      "artifactName": "WillemilksWaterEditor-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "WillemilksWaterEditor-Portable-${version}.${ext}"
     }
   }
 }

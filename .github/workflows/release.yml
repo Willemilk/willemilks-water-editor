@@ -1,0 +1,52 @@
+name: Build and Release
+
+# Pushing a version tag (e.g. v1.2.0) builds the Windows app in the cloud
+# and publishes it as a GitHub Release with the installer + portable exe attached.
+# You can also run it by hand from the Actions tab (workflow_dispatch).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Build Windows app (installer + portable)
+        run: npx electron-builder --win --publish never
+
+      - name: List built artifacts
+        shell: pwsh
+        run: Get-ChildItem release -Recurse -Include *.exe | Select-Object FullName, Length
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Willemilks Water Editor ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            release/*.exe
