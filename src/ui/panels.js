@@ -15,6 +15,29 @@ const FLUIDS = [
   ['drymud', 'spout.f.drymud'],
 ];
 
+// generators are powered by one of these fluids (AllowedFluids in the .hs)
+const GEN_FLUIDS = [
+  ['water', 'spout.f.water'],
+  ['steam', 'spout.f.steam'],
+  ['blackooze', 'gen.f.ooze'],
+];
+
+// temperature rays: TemperatureType drives what they do to the fluid they hit
+const RAY_TYPES = [
+  ['hot', 'ray.t.hot'],
+  ['cold', 'ray.t.cold'],
+  ['sludge', 'ray.t.sludge'],
+  ['matter', 'ray.t.matter'],
+  ['turf', 'ray.t.turf'],
+];
+
+// collectibles (ducks/stars): GnomeType decides which liquid picks them up
+const GNOME_TYPES = [
+  ['water', 'gnome.water'],
+  ['steam', 'gnome.steam'],
+  ['sludge', 'gnome.sludge'],
+];
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -318,6 +341,10 @@ const KIND_COLORS = {
   sprinkler: '#38bdf8',
   motor: '#94a6bb',
   collectible: '#fbbf24',
+  ray: '#fb7185',
+  generator: '#a3e635',
+  pipe: '#a8a29e',
+  mirror: '#67e8f9',
   generic: '#5c6f85',
 };
 
@@ -325,6 +352,8 @@ const KIND_SECTION_KEY = {
   bomb: 'sec.bomb', fan: 'sec.fan', vacuum: 'sec.vacuum', balloon: 'sec.balloon', switch: 'sec.switch',
   converter: 'sec.converter', ypipe: 'sec.ypipe', brokenpipe: 'sec.brokenpipe',
   teleport: 'sec.teleport', sprinkler: 'sec.sprinkler', motor: 'sec.motor',
+  ray: 'sec.ray', collectible: 'sec.collectible', generator: 'sec.generator',
+  pipe: 'sec.pipe', mirror: 'sec.mirror',
 };
 
 export class Inspector {
@@ -350,6 +379,8 @@ export class Inspector {
     if (/bomb|mine/.test(fn)) return 'bomb';
     if (/vacuum/.test(fn)) return 'vacuum';
     if (/fan/.test(fn)) return 'fan';
+    if (type === 'temperatureray' || p.TemperatureType !== undefined || p.RayAngle !== undefined) return 'ray';
+    if (type === 'generator' || p.GeneratorSprites !== undefined) return 'generator';
     if (/balloon|bubble/.test(fn)) return 'balloon';
     if (/y[_-]?switch|pipe_y/.test(fn) || p.YSwitchPosition !== undefined) return 'ypipe';
     if (/switch|lever/.test(fn) || p.SwitchType !== undefined) return 'switch';
@@ -358,8 +389,11 @@ export class Inspector {
     if (/teleport|portal/.test(fn)) return 'teleport';
     if (/sprinkler/.test(fn) || p.SprinklerWidth !== undefined) return 'sprinkler';
     if (type === 'spout' || /spout|drain|faucet|shower|valve/.test(fn) || p.SpoutType !== undefined) return 'spout';
-    if (/star|duck|note|collect/.test(fn)) return 'collectible';
-    if (p.PathPos0 !== undefined || p.MotorMoveSpeed !== undefined || p.MotorOn !== undefined) return 'motor';
+    if (type === 'star' || p.GnomeType !== undefined || /star|duck|note|collect|gnome/.test(fn)) return 'collectible';
+    // motors first: a pivoting mirror wall has motor props and should stay a motor
+    if (p.PathPos0 !== undefined || p.MotorMoveSpeed !== undefined || p.MotorOn !== undefined || p.MotorTurnSpeed !== undefined) return 'motor';
+    if (type === 'mirror' || /mirror/.test(fn)) return 'mirror';
+    if (type === 'pipe' || p.PipeType !== undefined || p.PipeWidth !== undefined) return 'pipe';
     return 'generic';
   }
 
@@ -489,6 +523,11 @@ export class Inspector {
       case 'teleport': return this._teleportSection(obj);
       case 'sprinkler': return this._sprinklerSection(obj);
       case 'motor': return this._motorSection(obj);
+      case 'ray': return this._raySection(obj);
+      case 'generator': return this._generatorSection(obj);
+      case 'collectible': return this._collectibleSection(obj);
+      case 'pipe': return this._pipeSection(obj);
+      case 'mirror': return this._mirrorSection(obj);
       default: return this._genericPhysicsSection(obj);
     }
   }
@@ -496,6 +535,9 @@ export class Inspector {
   /** Shared small controls. Every write goes through set(): push undo,
    *  stringify, delete when emptied, notify. */
   _controls(obj) {
+    // unset checkboxes reflect the object's .hs default, so the UI tells the
+    // truth even when a level never re authored the property
+    const defaults = this.cb.getDefaults?.(obj) || {};
     const set = (key, value) => {
       this.cb.push();
       if (value === '' || value == null) delete obj.properties[key];
@@ -511,7 +553,8 @@ export class Inspector {
     };
     const chk = (key, labelKey) => {
       const c = el('input', { type: 'checkbox' });
-      c.checked = obj.properties[key] === '1' || obj.properties[key] === 'true';
+      const v = obj.properties[key] ?? defaults[key];
+      c.checked = v === '1' || v === 'true';
       c.onchange = () => set(key, c.checked ? '1' : '0');
       return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
     };
@@ -567,23 +610,29 @@ export class Inspector {
         num('VacuumMaxD', 'prop.fanRange', '', '1')),
       el('div', { class: 'row gap' },
         num('VacuumMinAngle', 'prop.fanAngleMin', '', '5'),
-        num('VacuumMaxAngle', 'prop.fanAngleMax', '', '5')));
+        num('VacuumMaxAngle', 'prop.fanAngleMax', '', '5')),
+      num('VacuumFriction', 'prop.vacuumFriction', '', '0.05'));
   }
 
   _vacuumSection(obj) {
     const { num, chk } = this._controls(obj);
-    return this._section('vacuum', 'sec.vacuum',
+    const vac = this._section('vacuum', 'sec.vacuum',
       chk('VacuumOn', 'prop.vacuumOn'),
       el('div', { class: 'row gap' },
         num('VacuumMaxForce', 'prop.vacuumStrength', '100', '10'),
         num('VacuumMaxD', 'prop.vacuumRange', '', '1')),
       el('div', { class: 'row gap' },
         num('VacuumMinAngle', 'prop.vacuumAngleMin', '', '5'),
-        num('VacuumMaxAngle', 'prop.vacuumAngleMax', '', '5')));
+        num('VacuumMaxAngle', 'prop.vacuumAngleMax', '', '5')),
+      num('VacuumFriction', 'prop.vacuumFriction', '', '0.05'));
+    // a vacuum drain is a drain that also sucks: surface its drain and output
+    // spout controls below the vacuum knobs so both halves are editable
+    const alsoSpout = (obj.type || '').toLowerCase() === 'spout' || 'SpoutType' in obj.properties;
+    return alsoSpout ? el('div', {}, vac, this._spoutSection(obj)) : vac;
   }
 
   _balloonSection(obj) {
-    const { num, dragChk } = this._controls(obj);
+    const { num, chk, dragChk } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
     // InitialParticles is "<fluid> <count>" in the game ("water 70", "Steam 50", …)
     const init = String(obj.properties.InitialParticles || defaults.InitialParticles || 'water 10').trim().split(/\s+/);
@@ -607,6 +656,8 @@ export class Inspector {
       this._connPicker(obj, 'ConnectedSpout', t('conn.balloon')),
       num('GravityScale', 'prop.buoyancy', '', '0.1'),
       num('VelDamping', 'prop.damping', '', '0.01'),
+      chk('HasString', 'prop.hasString'),
+      chk('FingerPoppable', 'prop.poppable'),
       dragChk());
   }
 
@@ -691,8 +742,64 @@ export class Inspector {
       el('div', { class: 'row gap' },
         num('MotorMoveSpeed', 'prop.moveSpeed', '1', '0.5'),
         num('MotorWaitTime', 'prop.waitTime', '0', '0.1')),
+      el('div', { class: 'row gap' },
+        num('MotorTurnSpeed', 'prop.turnSpeed', '', '5'),
+        num('MotorWaitTurn', 'prop.waitTurn', '', '5')),
       chk('MotorPingPong', 'prop.pingPong'),
-      num('MotorTurnSpeed', 'prop.turnSpeed', '', '1'));
+      chk('MotorEase', 'prop.motorEase'),
+      el('p', { class: 'muted small', text: t('motor.hint') }));
+  }
+
+  /** Temperature ray: heats, freezes or contaminates the fluid it hits. */
+  _raySection(obj) {
+    const { num, sel } = this._controls(obj);
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    return this._section('ray', 'sec.ray',
+      sel('TemperatureType', 'prop.rayType', RAY_TYPES, defaults.TemperatureType || 'hot'),
+      sel('RayBeamType', 'prop.rayBeam', [['', 'ray.b.cont'], ['touch', 'ray.b.touch']], defaults.RayBeamType || ''),
+      num('RayAngle', 'prop.rayAngle', '0', '5'),
+      el('p', { class: 'muted small', text: t('ray.hint') }));
+  }
+
+  /** Generator: powered while a fluid runs over it, drives connected objects. */
+  _generatorSection(obj) {
+    const { sel } = this._controls(obj);
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const slots = this._connSlots(obj, 'ConnectedObject');
+    return this._section('generator', 'sec.generator',
+      sel('AllowedFluids', 'prop.genFluid', GEN_FLUIDS, defaults.AllowedFluids || 'water'),
+      el('div', { class: 'field' },
+        el('label', { text: t('conn.title') }),
+        ...slots.map((i) => this._connPicker(obj, 'ConnectedObject' + i, t('conn.controls', { n: i }))),
+        el('button', {
+          class: 'btn small', text: '+ ' + t('conn.add'),
+          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedObject' + slots.length),
+        })),
+      el('p', { class: 'muted small', text: t('gen.hint') }));
+  }
+
+  /** Collectible (duck/star): the fluid type that can pick it up. */
+  _collectibleSection(obj) {
+    const { num, sel } = this._controls(obj);
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    return this._section('collectible', 'sec.collectible',
+      sel('GnomeType', 'prop.gnomeType', GNOME_TYPES, defaults.GnomeType || 'water'),
+      num('CutRadius', 'prop.cutRadius', '6', '0.5'),
+      el('p', { class: 'muted small', text: t('coll.hint') }));
+  }
+
+  /** Pipe: visual routing guide. Width plus a note about how flow really works. */
+  _pipeSection(obj) {
+    const { num } = this._controls(obj);
+    return this._section('pipe', 'sec.pipe',
+      num('PipeWidth', 'prop.pipeWidth', '1.4', '0.1'),
+      el('p', { class: 'muted small', text: t('pipe.hint') }));
+  }
+
+  /** Mirror: rotate to bounce a temperature ray toward its target. */
+  _mirrorSection(obj) {
+    return this._section('mirror', 'sec.mirror',
+      el('p', { class: 'muted small', text: t('mirror.hint') }));
   }
 
   /** Physics quick controls, only for properties the object actually has. */
@@ -763,8 +870,16 @@ export class Inspector {
     const speed = el('input', { type: 'number', step: '1', min: '0', value: obj.properties.ParticleSpeed || '',
       placeholder: defaults.ParticleSpeed || '30', onchange: () => set('ParticleSpeed', speed.value) });
 
+    // aim and spread of the stream, relative to the object's own rotation
+    const aim = el('input', { type: 'number', step: '5', value: obj.properties.ExpulsionAngle ?? '',
+      placeholder: defaults.ExpulsionAngle ?? '0', onchange: () => set('ExpulsionAngle', aim.value) });
+    const spread = el('input', { type: 'number', step: '5', min: '0', value: obj.properties.ExpulsionAngleVariation ?? '',
+      placeholder: defaults.ExpulsionAngleVariation ?? '0', onchange: () => set('ExpulsionAngleVariation', spread.value) });
+
     // drains push what they swallow out of their connected spouts
     const isDrain = effType === 'Drain' || effType === 'DrainSpout';
+    // a pure Drain only swallows, so aim/spread make no sense there
+    const canExpel = effType !== 'Drain';
     const slots = this._connSlots(obj, 'ConnectedSpout');
     const probInput = (i) => el('input', { type: 'number', step: '5', min: '0', max: '100',
       value: obj.properties['ConnectedSpoutProbability' + i] || '', placeholder: '100',
@@ -815,6 +930,11 @@ export class Inspector {
         el('div', { class: 'field grow' }, el('label', { text: t('spout.flow') }), pps),
         el('div', { class: 'field grow' }, el('label', { text: t('prop.particleSpeed') }), speed),
         el('div', { class: 'field grow' }, el('label', { text: t('spout.limit') }), limit)),
+      canExpel
+        ? el('div', { class: 'row gap' },
+            el('div', { class: 'field grow' }, el('label', { text: t('prop.expulsionAngle') }), aim),
+            el('div', { class: 'field grow' }, el('label', { text: t('prop.expulsionSpread') }), spread))
+        : null,
       drainBlock,
       el('label', { class: 'check-row' }, timerChk, el('span', { text: t('spout.timer') })),
       hasTimer

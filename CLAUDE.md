@@ -59,9 +59,14 @@ electron/preload.cjs   contextBridge: window.native.*
 
 ## Object inspector (smart sections)
 `Inspector._objectKind(obj)` classifies by Filename/Type/properties into:
-spout, bomb, fan, balloon, switch, converter, ypipe, brokenpipe, teleport, sprinkler,
-motor, collectible, generic. Each kind gets a quick editor section writing real game
-properties (BlastRadius, VacuumMaxForce, SwitchType, ConnectedObject0…, etc.).
+spout, bomb, fan, vacuum, balloon, switch, converter, ypipe, brokenpipe, teleport,
+sprinkler, motor, ray (temperatureray: hot/cold/sludge/matter/turf), generator,
+collectible (star/duck GnomeType), pipe, mirror, generic. Each kind gets a quick editor
+section writing real game properties (BlastRadius, VacuumMaxForce, VacuumFriction,
+TemperatureType, GnomeType, AllowedFluids, MotorTurnSpeed/MotorWaitTurn/MotorEase,
+ExpulsionAngle, HasString, SwitchType, ConnectedObject0…, etc.). Checkboxes read the
+object's .hs defaults so e.g. a balloon shows HasString on even when the level never
+authored it. A vacuum drain (Type=spout + vacuum) shows both the vacuum and spout panels.
 Connections: `cb.onPickConnection(obj, propName)` → editor.pickObjectMode → next canvas
 click writes the target's name into the property. The canvas draws dashed arrows for all
 `Connected*` properties (toggle: Connections).
