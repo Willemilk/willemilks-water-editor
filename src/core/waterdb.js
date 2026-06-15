@@ -57,6 +57,19 @@ export async function writeChallenge(dbBytes, levelPath, requirements, desc) {
   }
 }
 
+/** Unlock every level and world pack so any can be opened and playtested. */
+export async function unlockEverything(dbBytes) {
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(dbBytes));
+  try {
+    db.run('UPDATE LevelInfo SET Unlocked = 1, Available = 1');
+    db.run('UPDATE LevelPackInfo SET Unlocked = 1, Bought = 1, LS_Unlocked = 1');
+    return db.export();
+  } finally {
+    db.close();
+  }
+}
+
 /** Remove the challenge row for a level. Returns new db bytes. */
 export async function clearChallenge(dbBytes, levelPath) {
   const SQL = await getSQL();

@@ -208,7 +208,7 @@ function renderEditor() {
             el('div', { class: 'tool-group', id: 'toolbar-tools' }),
             el('div', { class: 'tool-group', id: 'brush-group' },
               el('span', { class: 'muted small', text: t('tool.brush') }),
-              el('input', { type: 'range', min: '1', max: '9', step: '2', value: '1', id: 'brush-size',
+              el('input', { type: 'range', min: '1', max: '15', step: '2', value: '1', id: 'brush-size',
                 oninput: (e) => { state.editor.brushSize = parseInt(e.target.value); document.getElementById('brush-val').textContent = e.target.value; } }),
               el('span', { class: 'muted small', id: 'brush-val', text: '1' })
             ),
@@ -783,6 +783,7 @@ const PT_DEFAULTS = {
   deviceAddr: '127.0.0.1:16384',
   packageName: 'com.disney.WMW',
   resetData: false,
+  unlockAll: false,
 };
 
 function playtestSettings() {
@@ -802,6 +803,9 @@ function showSettings() {
 
   const resetData = el('input', { type: 'checkbox' });
   resetData.checked = pt.resetData;
+
+  const unlockAll = el('input', { type: 'checkbox' });
+  unlockAll.checked = pt.unlockAll;
 
   const fields = {};
   const pathField = (key, labelKey, browseFilters, helpKey = null) => {
@@ -846,6 +850,9 @@ function showSettings() {
       el('label', { class: 'check-row' }, resetData, el('span', {},
         el('strong', { text: t('settings.resetData') }),
         el('span', { class: 'muted small', text: ' ' + t('settings.resetDataSub') }))),
+      el('label', { class: 'check-row' }, unlockAll, el('span', {},
+        el('strong', { text: t('settings.unlockAll') }),
+        el('span', { class: 'muted small', text: ' ' + t('settings.unlockAllSub') }))),
       el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
         el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
         el('button', { class: 'btn primary', text: t('btn.save'), onclick: save }))
@@ -858,6 +865,7 @@ function showSettings() {
     setPref('playtest', {
       ...Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])),
       resetData: resetData.checked,
+      unlockAll: unlockAll.checked,
     });
     const newLang = langSel.value;
     overlay.remove();
@@ -914,10 +922,22 @@ async function runPlaytest() {
   try {
     // rebuild off the UI thread tick so the modal paints first
     await new Promise((r) => setTimeout(r, 30));
+    const pt = playtestSettings();
+    if (pt.unlockAll) {
+      const dbPath = waterDbPath(state.vfs);
+      if (dbPath) {
+        try {
+          const { unlockEverything } = await import('./core/waterdb.js');
+          state.vfs._put(dbPath, await unlockEverything(state.vfs.read(dbPath)));
+          addLine('Unlocked all levels and worlds in water.db', 'step');
+        } catch (e) { addLine('Could not unlock all: ' + (e.message || e), 'error'); }
+      }
+    }
     const apk = rebuildApk(state.vfs.sourceApk.data, state.vfs, (m) => addLine(m, 'step'));
     addLine(`APK ready (${(apk.length / 1048576).toFixed(1)} MB)`, 'step');
     status.textContent = '';
-    const res = await window.native.playtest(apk, playtestSettings());
+    // unlocking and db edits only load on fresh data, so force the reset then
+    const res = await window.native.playtest(apk, { ...pt, resetData: pt.resetData || pt.unlockAll });
     status.textContent = res.ok ? t('pt.done') : t('pt.failed');
     status.className = res.ok ? 'small' : 'error small';
   } catch (err) {

@@ -319,7 +319,7 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   color: var(--accent);
 }
 #brush-group { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-dim); }
-#brush-size { width: 90px; }
+#brush-size { width: 160px; }
 #brush-val { font-family: var(--mono); width: 16px; text-align: center; color: var(--text); }
 
 /* material bar */
