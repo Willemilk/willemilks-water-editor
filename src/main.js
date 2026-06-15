@@ -183,6 +183,7 @@ function renderEditor() {
           el('span', { class: 'vsep' }),
           el('button', { class: 'btn primary', id: 'btn-save', text: t('btn.save'), title: 'Ctrl+S', onclick: saveCurrent }),
           el('button', { class: 'btn', id: 'btn-export', text: t('btn.export') + ' ▾', onclick: toggleExportMenu }),
+          el('button', { class: 'btn', id: 'btn-worlds', text: t('btn.worlds'), title: t('world.title'), onclick: showWorldBuilder }),
           window.native?.isApp
             ? el('button', { class: 'btn', id: 'btn-playtest', text: '▶ ' + t('btn.playtest'), title: 'F5', onclick: runPlaytest })
             : null,
@@ -881,6 +882,149 @@ function showSettings() {
   document.body.append(overlay);
 }
 
+// ============================================================ custom worlds
+
+const WORLD_ICONS = ['world_select_00', 'world_select_01', 'world_select_02', 'world_select_03',
+  'world_select_04', 'world_select_05', 'world_select_06', 'world_select_07', 'world_select_08'];
+const WORLD_TILES = ['tile_yellow', 'tile_purple', 'tile_green', 'tile_magenta'];
+
+/** "/Levels/foo" for a level browser entry, used as the LevelInfo Filename. */
+function levelFilename(entry) {
+  const m = (entry.xmlPath || '').match(/(Levels\/.+?)\.xml$/i);
+  return m ? '/' + m[1] : null;
+}
+
+/** Re-apply every saved custom world into the VFS water.db (idempotent). */
+async function applyAllWorlds() {
+  if (!state.vfs) return 0;
+  const worlds = getPref('customWorlds', []);
+  if (!worlds.length) return 0;
+  const dbPath = waterDbPath(state.vfs);
+  if (!dbPath) throw new Error('water.db not found');
+  const { createWorld } = await import('./core/waterdb.js');
+  let bytes = state.vfs.read(dbPath);
+  for (const w of worlds) {
+    if (w.iconData) {
+      const raw = Uint8Array.from(atob(w.iconData), (ch) => ch.charCodeAt(0));
+      state.vfs._put(`assets/Textures/${w.packIcon}.png`, raw);
+      state.vfs._put(`assets/Textures/${w.packIcon}-HD.png`, raw);
+    }
+    bytes = await createWorld(bytes, w);
+  }
+  state.vfs._put(dbPath, bytes);
+  return worlds.length;
+}
+
+function showWorldBuilder() {
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
+  document.querySelector('.modal-overlay')?.remove();
+  let editing = null;
+
+  const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
+  const card = el('div', { class: 'welcome-card modal-card settings-card' });
+  overlay.append(card);
+
+  function render() {
+    const worlds = getPref('customWorlds', []);
+    const cur = editing != null ? worlds[editing] : null;
+    const nameInp = el('input', { type: 'text', placeholder: t('world.namePh'), value: cur ? cur.displayName : '' });
+    const iconSel = el('select', {}, ...WORLD_ICONS.map((ic) => el('option', { value: ic, text: ic, selected: cur && cur.packIcon === ic ? '' : null })));
+    const tileSel = el('select', {}, ...WORLD_TILES.map((tt) => el('option', { value: tt, text: tt, selected: cur && cur.tileTexture === tt ? '' : null })));
+    const iconFile = el('input', { type: 'file', accept: 'image/png,image/webp,image/jpeg' });
+
+    const picked = new Set(cur ? cur.levels.map((l) => l.filename) : []);
+    const countLbl = el('span', { class: 'muted small' });
+    const updateCount = () => { countLbl.textContent = t('world.picked', { n: picked.size }); };
+    const levelList = el('div', { class: 'world-levels' });
+    const rows = [];
+    for (const lv of state.levels) {
+      const fn = levelFilename(lv);
+      if (!fn) continue;
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = picked.has(fn);
+      cb.onchange = () => {
+        if (cb.checked) { if (picked.size >= 20) { cb.checked = false; toast(t('world.max'), 'warn'); return; } picked.add(fn); }
+        else picked.delete(fn);
+        updateCount();
+      };
+      const row = el('label', { class: 'check-row world-lv' }, cb, el('span', { text: lv.name }));
+      rows.push({ row, name: lv.name.toLowerCase() });
+      levelList.append(row);
+    }
+    updateCount();
+    const filter = el('input', { type: 'search', placeholder: t('world.filter'),
+      oninput: (e) => { const q = e.target.value.toLowerCase(); rows.forEach((r) => { r.row.style.display = r.name.includes(q) ? '' : 'none'; }); } });
+
+    const onSave = async () => {
+      const name = nameInp.value.trim();
+      if (!name) return toast(t('world.needName'), 'warn');
+      if (!picked.size) return toast(t('world.needLevels'), 'warn');
+      const list = getPref('customWorlds', []);
+      const existing = editing != null ? list[editing] : null;
+      const packName = existing?.packName || ('LP_CUSTOM_' + Date.now().toString(36));
+      const def = {
+        packName, displayName: name, tileTexture: tileSel.value, packIcon: iconSel.value,
+        iconData: existing?.iconData || null,
+        levels: [...picked].map((fn) => ({ name: fn.split('/').pop(), filename: fn })),
+      };
+      const file = iconFile.files?.[0];
+      if (file) {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        let bin = ''; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+        def.iconData = btoa(bin);
+        def.packIcon = packName.toLowerCase();
+      }
+      if (editing != null) list[editing] = def; else list.push(def);
+      setPref('customWorlds', list);
+      try { await applyAllWorlds(); markDirty(); toast(t('world.saved'), 'ok', 4000); }
+      catch (e) { console.error(e); toast(t('ch.dbFail'), 'err', 7000); }
+      overlay.remove();
+    };
+
+    card.replaceChildren(
+      el('h3', { text: t('world.title') }),
+      el('p', { class: 'muted small', text: t('world.hint') }),
+      worlds.length
+        ? el('div', { class: 'world-list' }, ...worlds.map((w, i) =>
+            el('div', { class: 'world-row' },
+              el('span', { class: 'grow', text: `${w.displayName} · ${w.levels.length}` }),
+              el('button', { class: 'btn small', text: t('world.edit'), onclick: () => { editing = i; render(); } }),
+              el('button', {
+                class: 'btn small danger', text: t('btn.delete'),
+                onclick: async () => {
+                  const ws = getPref('customWorlds', []);
+                  const [rm] = ws.splice(i, 1);
+                  setPref('customWorlds', ws);
+                  try {
+                    const { removeWorld } = await import('./core/waterdb.js');
+                    const p = waterDbPath(state.vfs);
+                    if (p && rm) { state.vfs._put(p, await removeWorld(state.vfs.read(p), rm.packName)); markDirty(); }
+                  } catch (e) { console.error(e); }
+                  editing = null; render();
+                },
+              }))))
+        : null,
+      el('div', { class: 'sep' }),
+      el('h4', { text: cur ? t('world.editing') : t('world.new') }),
+      el('div', { class: 'field' }, el('label', { text: t('world.name') }), nameInp),
+      el('div', { class: 'row gap' },
+        el('div', { class: 'field grow' }, el('label', { text: t('world.icon') }), iconSel),
+        el('div', { class: 'field grow' }, el('label', { text: t('world.tile') }), tileSel)),
+      el('div', { class: 'field' }, el('label', { text: t('world.customIcon') }), iconFile),
+      el('div', { class: 'field' },
+        el('div', { class: 'row gap', style: 'align-items:center' }, el('label', { text: t('world.levels') }), countLbl),
+        filter, levelList),
+      el('p', { class: 'muted small', text: t('world.caveat') }),
+      el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
+        cur ? el('button', { class: 'btn', text: t('world.newBtn'), onclick: () => { editing = null; render(); } }) : null,
+        el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
+        el('button', { class: 'btn primary', text: cur ? t('world.update') : t('world.create'), onclick: onSave }))
+    );
+  }
+  render();
+  document.body.append(overlay);
+}
+
 // ============================================================ playtest
 
 let ptRunning = false;
@@ -933,11 +1077,16 @@ async function runPlaytest() {
         } catch (e) { addLine('Could not unlock all: ' + (e.message || e), 'error'); }
       }
     }
+    let worldCount = 0;
+    try {
+      worldCount = await applyAllWorlds();
+      if (worldCount) addLine(`Added ${worldCount} custom world(s) to water.db`, 'step');
+    } catch (e) { addLine('Custom worlds: ' + (e.message || e), 'error'); }
     const apk = rebuildApk(state.vfs.sourceApk.data, state.vfs, (m) => addLine(m, 'step'));
     addLine(`APK ready (${(apk.length / 1048576).toFixed(1)} MB)`, 'step');
     status.textContent = '';
-    // unlocking and db edits only load on fresh data, so force the reset then
-    const res = await window.native.playtest(apk, { ...pt, resetData: pt.resetData || pt.unlockAll });
+    // unlocking, worlds and db edits only load on fresh data, so force the reset
+    const res = await window.native.playtest(apk, { ...pt, resetData: pt.resetData || pt.unlockAll || worldCount > 0 });
     status.textContent = res.ok ? t('pt.done') : t('pt.failed');
     status.className = res.ok ? 'small' : 'error small';
   } catch (err) {

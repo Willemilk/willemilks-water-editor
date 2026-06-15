@@ -48,7 +48,7 @@ src/core/objects.js    .hs → .sprite → .imagelist → .webp resolver + categ
 src/core/png.js        custom indexed PNG encoder
 src/core/coords.js     coordinate math + groupColor()
 src/core/challenge.js  custom challenge condition catalog + requirements build/parse
-src/core/waterdb.js    lazy sql.js wrapper to read/write challenges in water.db
+src/core/waterdb.js    lazy sql.js: challenges, unlockEverything, createWorld/removeWorld
 src/core/export.js     level zip / xml / png / whole assets tree download
 src/ui/editor.js       canvas: tools, zoom/pan, drag, paths, connection overlay
 src/ui/panels.js       el(), LevelBrowser, ObjectBrowser, Inspector (smart sections)
@@ -99,6 +99,20 @@ copies water.db to writable storage on first run, so an existing install must cl
 data once for new challenges to show. sql.js is lazy + guarded: if the WASM fails the
 editor still works and the user can copy the requirements string. Music per level and
 world image per level are NOT engine supported (music/background are per world pack).
+
+## Custom worlds + unlock all (v1.6.0 / v1.7.0)
+water.db drives the level/world UI. `unlockEverything` sets LevelInfo.Unlocked/Available=1
+and LevelPackInfo.Unlocked/Bought/LS_Unlocked=1 (Settings: "Unlock all levels and worlds").
+`createWorld(db, {packName, displayName, tileTexture, packIcon, levels})` inserts a
+LevelPackInfo row (Storyline 0 = Swampy, Unlocked, StarsRequired 0) + one LevelInfo row per
+level (Filename "/Levels/x"), idempotent per packName; `removeWorld` deletes them. The world
+select is data driven (template copied per pack), so a new Storyline 0 pack just appears; the
+duck counter is computed by the game from the db, so it updates automatically. The "Worlds"
+topbar button opens `showWorldBuilder` (name, built in icon or uploaded image, tile, up to 20
+levels from the VFS). Worlds are stored in localStorage ('customWorlds'); `applyAllWorlds`
+re-applies them to the VFS db on every playtest and forces resetData. Custom level files must
+exist in the VFS (saveIntoVFS) for the LevelInfo rows to resolve in game. Both features only
+take effect after a data reset (same water.db copy-on-first-run caveat as challenges).
 
 ## Known gotchas
 - window.prompt() does not work in Electron → use modalPrompt() in src/main.js.

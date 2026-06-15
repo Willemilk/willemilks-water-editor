@@ -898,6 +898,19 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
 .row.wrap { flex-wrap: wrap; }
 input.mono { font-family: var(--mono); font-size: 11px; }
 
+/* custom world builder */
+.world-list { margin-bottom: 8px; }
+.world-row {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); padding: 6px 9px; margin-bottom: 5px;
+}
+.world-levels {
+  max-height: 240px; overflow-y: auto; margin-top: 6px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 6px 9px;
+}
+.world-lv { display: flex; }
+
 /* connection picking banner over the canvas */
 .connection-banner {
   position: absolute;

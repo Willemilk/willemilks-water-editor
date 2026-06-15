@@ -70,6 +70,55 @@ export async function unlockEverything(dbBytes) {
   }
 }
 
+/**
+ * Create (or replace) a custom Swampy world in water.db. Adds a LevelPackInfo
+ * row (Storyline 0 so it sits with Swampy's worlds, Unlocked, no star gate) and
+ * a LevelInfo row per level so the game lists them. Idempotent per packName.
+ * world = { packName, displayName, tileTexture, packIcon, levels: [{name, filename, parTime}] }
+ */
+export async function createWorld(dbBytes, world) {
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(dbBytes));
+  try {
+    db.run('DELETE FROM LevelInfo WHERE PackName = :p', { ':p': world.packName });
+    db.run('DELETE FROM LevelPackInfo WHERE PackName = :p', { ':p': world.packName });
+    const packId = ((db.exec('SELECT MAX(ID) FROM LevelPackInfo')[0]?.values[0][0]) || 100) + 1;
+    db.run(
+      `INSERT INTO LevelPackInfo (ID, PackName, Unlocked, HasPlayed, StarsRequired, TileTexture,
+        LightingColor, CurtainTexture, LockColor, PackType, Hidden, PackIcon, Storyline,
+        IAP_item_id, Bought, FB_AlbumName, DisplayPackName, LS_Unlocked, GrayType)
+       VALUES (:id, :p, 1, 0, 0, :tile, '188 153 71', 'shower_curtain_01', '255 255 255', 0, 0,
+        :icon, 0, '', 1, :name, :name, 1, 0)`,
+      { ':id': packId, ':p': world.packName, ':tile': world.tileTexture || 'tile_yellow',
+        ':icon': world.packIcon || 'world_select_00', ':name': world.displayName || world.packName });
+    let lid = ((db.exec('SELECT MAX(ID) FROM LevelInfo')[0]?.values[0][0]) || 0) + 1;
+    for (const lv of (world.levels || []).slice(0, 20)) {
+      db.run(
+        `INSERT INTO LevelInfo (ID, Name, Filename, Stars, PackName, TimesPlayed, TimesFinished,
+          Unlocked, ParTime, BestScore, CollectibleFound, PlayTime, TimesRetried, IgnoreInStarCount,
+          Type, Available, IsBonus)
+         VALUES (:id, :nm, :fn, 0, :p, 0, 0, 1, :par, 0, -1, 0, 0, 0, 0, 1, 0)`,
+        { ':id': lid++, ':nm': lv.name, ':fn': lv.filename, ':p': world.packName, ':par': lv.parTime || 60 });
+    }
+    return db.export();
+  } finally {
+    db.close();
+  }
+}
+
+/** Remove a custom world (its pack + levels) from water.db. */
+export async function removeWorld(dbBytes, packName) {
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(dbBytes));
+  try {
+    db.run('DELETE FROM LevelInfo WHERE PackName = :p', { ':p': packName });
+    db.run('DELETE FROM LevelPackInfo WHERE PackName = :p', { ':p': packName });
+    return db.export();
+  } finally {
+    db.close();
+  }
+}
+
 /** Remove the challenge row for a level. Returns new db bytes. */
 export async function clearChallenge(dbBytes, levelPath) {
   const SQL = await getSQL();
