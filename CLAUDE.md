@@ -64,12 +64,22 @@ sprinkler, motor, ray (temperatureray: hot/cold/sludge/matter/turf), generator,
 collectible (star/duck GnomeType), pipe, mirror, generic. Each kind gets a quick editor
 section writing real game properties (BlastRadius, VacuumMaxForce, VacuumFriction,
 TemperatureType, GnomeType, AllowedFluids, MotorTurnSpeed/MotorWaitTurn/MotorEase,
-ExpulsionAngle, HasString, SwitchType, ConnectedObject0…, etc.). Checkboxes read the
-object's .hs defaults so e.g. a balloon shows HasString on even when the level never
-authored it. A vacuum drain (Type=spout + vacuum) shows both the vacuum and spout panels.
-Connections: `cb.onPickConnection(obj, propName)` → editor.pickObjectMode → next canvas
-click writes the target's name into the property. The canvas draws dashed arrows for all
-`Connected*` properties (toggle: Connections).
+ExpulsionAngle, HasString, ConnectedObject0…, etc.). Checkboxes read the object's .hs
+defaults so e.g. a balloon shows HasString on even when the level never authored it. A
+vacuum drain keeps its niche drain/output props in Advanced (just a note in the panel).
+
+GROUPS (v1.4.1): switch type (flip vs momentary) is intrinsic to the placed object
+(switch.hs vs switch_momentary.hs, never authored in levels) so it is shown read only, not
+a dropdown. A switch/generator drives a color coded "group" = its ConnectedObjectN targets
+(`_groupMembersBlock`). Controllable objects (fan/vacuum/motor) show a "Controlled by" block
+at the top (`_controlledByBlock`, reverse scan of who points at this object). The empty
+inspector shows a `_groupsOverview` menu of every group. `groupColor(name)` in coords.js
+gives a stable palette color per controller name, reused by the inspector chips and the
+canvas arrows. The "on without a switch" toggles are VacuumOn/MotorOn.
+Connections: `cb.onPickConnection(obj, propName)` writes the clicked target's name into the
+property; `cb.onPickController(target)` is the reverse (clicked switch/generator gets target
+appended to its next ConnectedObjectN). The canvas draws dashed arrows for all `Connected*`
+properties, switch/generator → object arrows colored per group (toggle: Connections).
 
 ## Known gotchas
 - window.prompt() does not work in Electron → use modalPrompt() in src/main.js.

@@ -309,6 +309,38 @@ function renderEditor() {
       };
       document.getElementById('connection-banner')?.classList.remove('hidden');
     },
+    // reverse of onPickConnection: pick a switch/generator in the canvas and add
+    // THIS object to that controller's group (writes ConnectedObjectN on it)
+    onPickController: (target) => {
+      state.editor.pickObjectMode = (hit) => {
+        if (hit === target) return;
+        const ht = (hit.properties.Type || '').toLowerCase();
+        const hfn = (hit.properties.Filename || '').toLowerCase();
+        const isController = ht === 'switch' || ht === 'generator'
+          || /switch|lever|generator/.test(hfn)
+          || Object.keys(hit.properties).some((k) => /^ConnectedObject\d+$/.test(k));
+        if (!isController) { toast(t('group.pickSwitch'), 'warn', 2400); return; }
+        const already = Object.entries(hit.properties)
+          .some(([k, v]) => /^ConnectedObject\d+$/.test(k) && v === target.name);
+        state.level.pushUndo();
+        if (!already) {
+          let i = 0;
+          while (hit.properties['ConnectedObject' + i] !== undefined) i++;
+          hit.properties['ConnectedObject' + i] = target.name;
+        }
+        cancelConnectionPick();
+        inspector.render();
+        state.editor.requestRender();
+        markDirty();
+        toast(t('conn.done', { name: hit.name }), 'ok', 2200);
+      };
+      document.getElementById('connection-banner')?.classList.remove('hidden');
+    },
+    onSelect: (obj) => {
+      state.editor.selected = obj;
+      inspector.setObject(obj);
+      state.editor.requestRender();
+    },
     onDelete: (obj) => {
       state.level.pushUndo();
       state.level.removeObject(obj);

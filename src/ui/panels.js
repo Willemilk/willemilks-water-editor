@@ -1,7 +1,7 @@
 // Side panels: level browser (left), object browser (left tab), and the
 // properties inspector (right).
 import { categorize } from '../core/objects.js';
-import { GRID_TO_PX, degToRad } from '../core/coords.js';
+import { GRID_TO_PX, degToRad, groupColor } from '../core/coords.js';
 import { MATERIALS, nearestMaterial, materialForColor } from '../data/materials.js';
 
 /** Every fluid the game ships levels with (found by scanning all 636 levels). */
@@ -412,6 +412,7 @@ export class Inspector {
     if (!this.object) {
       this.container.replaceChildren(
         el('div', { class: 'inspector-empty' },
+          this._groupsOverview(level),
           el('h3', { text: t('insp.levelProps') }),
           this._kvEditor(level.properties, () => this.cb.onEdit()),
           el('div', { class: 'sep' }),
@@ -604,6 +605,7 @@ export class Inspector {
   _fanSection(obj) {
     const { num, chk } = this._controls(obj);
     return this._section('fan', 'sec.fan',
+      this._controlledByBlock(obj),
       chk('VacuumOn', 'prop.fanOn'),
       el('div', { class: 'row gap' },
         num('VacuumMaxForce', 'prop.fanStrength', '100', '10'),
@@ -616,7 +618,11 @@ export class Inspector {
 
   _vacuumSection(obj) {
     const { num, chk } = this._controls(obj);
-    const vac = this._section('vacuum', 'sec.vacuum',
+    // a vacuum drain also removes fluid; that drain side is niche, so it stays
+    // in Advanced and we only show a short note instead of a full spout panel
+    const alsoDrain = (obj.type || '').toLowerCase() === 'spout' || 'SpoutType' in obj.properties;
+    return this._section('vacuum', 'sec.vacuum',
+      this._controlledByBlock(obj),
       chk('VacuumOn', 'prop.vacuumOn'),
       el('div', { class: 'row gap' },
         num('VacuumMaxForce', 'prop.vacuumStrength', '100', '10'),
@@ -624,11 +630,8 @@ export class Inspector {
       el('div', { class: 'row gap' },
         num('VacuumMinAngle', 'prop.vacuumAngleMin', '', '5'),
         num('VacuumMaxAngle', 'prop.vacuumAngleMax', '', '5')),
-      num('VacuumFriction', 'prop.vacuumFriction', '', '0.05'));
-    // a vacuum drain is a drain that also sucks: surface its drain and output
-    // spout controls below the vacuum knobs so both halves are editable
-    const alsoSpout = (obj.type || '').toLowerCase() === 'spout' || 'SpoutType' in obj.properties;
-    return alsoSpout ? el('div', {}, vac, this._spoutSection(obj)) : vac;
+      num('VacuumFriction', 'prop.vacuumFriction', '', '0.05'),
+      alsoDrain ? el('p', { class: 'muted small', text: t('vacuum.drainNote') }) : null);
   }
 
   _balloonSection(obj) {
@@ -668,18 +671,104 @@ export class Inspector {
   }
 
   _switchSection(obj) {
-    const { sel } = this._controls(obj);
-    const slots = this._connSlots(obj, 'ConnectedObject');
+    // The switch type (flip vs momentary) is decided by which switch object was
+    // placed, never by the level, so it is shown read only instead of editable.
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const momentary = String(obj.properties.SwitchType || defaults.SwitchType || 'flip').toLowerCase() === 'momentary';
     return this._section('switch', 'sec.switch',
-      sel('SwitchType', 'prop.switchType',
-        [['Flip', 'prop.switchFlip'], ['Momentary', 'prop.switchMomentary']], 'Flip'),
-      el('div', { class: 'field' },
-        el('label', { text: t('conn.title') }),
-        ...slots.map((i) => this._connPicker(obj, 'ConnectedObject' + i, t('conn.controls', { n: i }))),
-        el('button', {
-          class: 'btn small', text: '+ ' + t('conn.add'),
-          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedObject' + slots.length),
-        })));
+      el('p', { class: 'muted small', text: t(momentary ? 'prop.switchMomentary' : 'prop.switchFlip') }),
+      this._groupMembersBlock(obj));
+  }
+
+  /** Re-pack ConnectedObject0..N so there are no gaps after a removal. */
+  _compactConn(obj) {
+    const vals = Object.keys(obj.properties)
+      .filter((k) => /^ConnectedObject\d+$/.test(k))
+      .sort((a, b) => parseInt(a.slice(15), 10) - parseInt(b.slice(15), 10))
+      .map((k) => obj.properties[k]);
+    Object.keys(obj.properties).forEach((k) => { if (/^ConnectedObject\d+$/.test(k)) delete obj.properties[k]; });
+    vals.forEach((v, i) => { obj.properties['ConnectedObject' + i] = v; });
+  }
+
+  /** The colored "group" a switch or generator drives: when triggered, every
+   *  object below turns on together. Members are the ConnectedObjectN targets. */
+  _groupMembersBlock(obj) {
+    const color = groupColor(obj.name);
+    const slots = this._connSlots(obj, 'ConnectedObject');
+    return el('div', { class: 'group-box', style: `border-color:${color}` },
+      el('div', { class: 'group-head' },
+        el('span', { class: 'group-chip', style: `background:${color}` }),
+        el('span', { class: 'group-title', style: `color:${color}`, text: t('group.title') })),
+      el('p', { class: 'muted small', text: t('group.explain') }),
+      ...slots.map((i) => {
+        const target = obj.properties['ConnectedObject' + i] || '';
+        return el('div', { class: 'conn-row' },
+          el('span', { class: 'conn-value' + (target ? '' : ' none'), title: target, text: target || t('conn.none') }),
+          el('button', {
+            class: 'icon-btn', title: t('conn.clear'), html: '&times;',
+            onclick: () => { this.cb.push(); delete obj.properties['ConnectedObject' + i]; this._compactConn(obj); this.cb.onEdit(); this.render(); },
+          }));
+      }),
+      el('button', {
+        class: 'btn small', text: '+ ' + t('group.addMember'),
+        onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedObject' + slots.length),
+      }));
+  }
+
+  /** Reverse view for a controllable object: which switch group(s) drive it,
+   *  shown at the top so it reads like "this fan belongs to group X". */
+  _controlledByBlock(obj) {
+    const level = this.cb.getLevel();
+    if (!level || !obj.name) return null;
+    const controllers = [];
+    for (const o of level.objects) {
+      if (o === obj) continue;
+      for (const [k, v] of Object.entries(o.properties)) {
+        if (k.startsWith('ConnectedObject') && v === obj.name) { controllers.push({ o, key: k }); break; }
+      }
+    }
+    return el('div', { class: 'group-box ctrl' },
+      el('div', { class: 'group-head' },
+        el('span', { class: 'group-title', text: t('group.controlledBy') })),
+      controllers.length
+        ? el('div', {}, ...controllers.map(({ o, key }) => {
+            const color = groupColor(o.name);
+            return el('div', { class: 'conn-row' },
+              el('span', { class: 'group-chip sm', style: `background:${color}` }),
+              el('span', { class: 'conn-value', title: o.name, text: o.name }),
+              el('button', {
+                class: 'icon-btn', title: t('conn.clear'), html: '&times;',
+                onclick: () => { this.cb.push(); delete o.properties[key]; this.cb.onEdit(); this.render(); },
+              }));
+          }))
+        : el('p', { class: 'muted small', text: t('group.notControlled') }),
+      el('button', {
+        class: 'btn small', text: t('group.controlWith'),
+        onclick: () => this.cb.onPickController?.(obj),
+      }));
+  }
+
+  /** A friendly menu of every switch/generator group in the level. Each row is
+   *  color matched to the canvas arrows; clicking opens that controller. */
+  _groupsOverview(level) {
+    const isMember = (o, k) => /^ConnectedObject\d+$/.test(k) && o.properties[k];
+    const controllers = level.objects.filter((o) => Object.keys(o.properties).some((k) => isMember(o, k)));
+    if (!controllers.length) return null;
+    return el('div', { class: 'groups-overview' },
+      el('h3', { text: t('group.overview') }),
+      el('p', { class: 'muted small', text: t('group.overviewHint') }),
+      ...controllers.map((o) => {
+        const color = groupColor(o.name);
+        const n = Object.keys(o.properties).filter((k) => isMember(o, k)).length;
+        return el('button', {
+          class: 'group-row', style: `border-left-color:${color}`,
+          onclick: () => this.cb.onSelect?.(o),
+        },
+          el('span', { class: 'group-chip', style: `background:${color}` }),
+          el('span', { class: 'group-row-name', title: o.name, text: o.name }),
+          el('span', { class: 'muted small', text: t('group.members', { n }) }));
+      }),
+      el('div', { class: 'sep' }));
   }
 
   _converterSection(obj) {
@@ -738,6 +827,7 @@ export class Inspector {
   _motorSection(obj) {
     const { num, chk } = this._controls(obj);
     return this._section('motor', 'sec.motor',
+      this._controlledByBlock(obj),
       chk('MotorOn', 'prop.motorOn'),
       el('div', { class: 'row gap' },
         num('MotorMoveSpeed', 'prop.moveSpeed', '1', '0.5'),
@@ -765,16 +855,9 @@ export class Inspector {
   _generatorSection(obj) {
     const { sel } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
-    const slots = this._connSlots(obj, 'ConnectedObject');
     return this._section('generator', 'sec.generator',
       sel('AllowedFluids', 'prop.genFluid', GEN_FLUIDS, defaults.AllowedFluids || 'water'),
-      el('div', { class: 'field' },
-        el('label', { text: t('conn.title') }),
-        ...slots.map((i) => this._connPicker(obj, 'ConnectedObject' + i, t('conn.controls', { n: i }))),
-        el('button', {
-          class: 'btn small', text: '+ ' + t('conn.add'),
-          onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedObject' + slots.length),
-        })),
+      this._groupMembersBlock(obj),
       el('p', { class: 'muted small', text: t('gen.hint') }));
   }
 

@@ -16,6 +16,20 @@ export function imgToWorld(ix, iy, imgW, imgH) {
 
 export function degToRad(d) { return (d * Math.PI) / 180; }
 
+// Stable color for a switch/generator "group", keyed by the controller's name.
+// Shared by the inspector (group chips) and the canvas (connection arrows) so a
+// group looks the same everywhere. Deterministic: same name -> same color.
+export const GROUP_PALETTE = [
+  '#ffb454', '#3ddc84', '#2ea7ff', '#a78bfa', '#f472b6',
+  '#f59e0b', '#22d3ee', '#a3e635', '#fb7185', '#60a5fa',
+];
+export function groupColor(name) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return GROUP_PALETTE[h % GROUP_PALETTE.length];
+}
+
 /** Rotate a 2D point around origin, CCW-positive (math/world convention). */
 export function rotatePoint(x, y, deg) {
   if (!deg) return [x, y];

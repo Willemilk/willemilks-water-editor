@@ -1,7 +1,7 @@
 // The editor viewport: renders terrain (nearest-neighbor scaled) + objects from
 // game atlases, and handles every interaction — select/move objects, paint
 // terrain, edit motor paths, zoom and pan.
-import { GRID_TO_PX, worldToImg, imgToWorld, degToRad } from '../core/coords.js';
+import { GRID_TO_PX, worldToImg, imgToWorld, degToRad, groupColor } from '../core/coords.js';
 import { getMaterial, rockFamilyRgbs } from '../data/materials.js';
 
 const SNAP_DIST = 0.5; // world units — neighbor edge/center snapping while dragging objects
@@ -665,7 +665,9 @@ export class Editor {
           const target = byName.get(v);
           if (!target || target === obj) continue;
           const kind = k.startsWith('ConnectedSpout') ? 'spout' : k.startsWith('ConnectedYSwitch') ? 'ypipe' : 'obj';
-          connections.push({ from: obj, to: target, kind });
+          // switch/generator -> object arrows are color matched to the group chip
+          const color = kind === 'obj' ? groupColor(obj.name) : null;
+          connections.push({ from: obj, to: target, kind, color });
           connSources.add(obj);
           connTargets.add(target);
         }
@@ -784,10 +786,10 @@ export class Editor {
   }
 
   /** Dashed arrow from a controlling object to its target. */
-  _drawConnection(ctx, { from, to, kind }) {
+  _drawConnection(ctx, { from, to, kind, color: groupCol }) {
     const [x0, y0] = this.worldToScreen(from.x, from.y);
     const [x1, y1] = this.worldToScreen(to.x, to.y);
-    const color = kind === 'spout' ? '#a78bfa' : kind === 'ypipe' ? '#5eead4' : '#2ea7ff';
+    const color = groupCol || (kind === 'spout' ? '#a78bfa' : kind === 'ypipe' ? '#5eead4' : '#2ea7ff');
     ctx.save();
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.8;
@@ -816,8 +818,10 @@ export class Editor {
     const b = vis?.bboxPx || { maxX: 6, minY: -6 };
     const x = ox + b.maxX * this.zoom;
     const y = oy + b.minY * this.zoom;
+    // switch/generator sources use their group color; other sources stay blue
+    const isController = Object.keys(obj.properties).some((k) => /^ConnectedObject\d+$/.test(k));
     ctx.save();
-    ctx.fillStyle = outgoing ? '#2ea7ff' : '#ffb454';
+    ctx.fillStyle = outgoing ? (isController ? groupColor(obj.name) : '#2ea7ff') : '#ffb454';
     ctx.strokeStyle = '#0b0f17';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
