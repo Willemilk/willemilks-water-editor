@@ -36,17 +36,20 @@ export async function writeChallenge(dbBytes, levelPath, requirements, desc) {
   const SQL = await getSQL();
   const db = new SQL.Database(new Uint8Array(dbBytes));
   try {
+    // every stock Cranky challenge belongs to the crankypack01 IAP group and is
+    // marked Available; match that exactly so the game surfaces our row too
+    const PACK = 'crankypack01';
     const existing = db.exec(`SELECT ID FROM ${TABLE} WHERE LevelName = :p`, { ':p': levelPath });
     if (existing.length && existing[0].values.length) {
-      db.run(`UPDATE ${TABLE} SET LevelRequirements = :r, Desc = :d, Available = 1 WHERE LevelName = :p`,
-        { ':r': requirements, ':d': desc, ':p': levelPath });
+      db.run(`UPDATE ${TABLE} SET LevelRequirements = :r, Desc = :d, Available = 1, IAP_item_id = :iap WHERE LevelName = :p`,
+        { ':r': requirements, ':d': desc, ':iap': PACK, ':p': levelPath });
     } else {
       const m = db.exec(`SELECT MAX(ID) FROM ${TABLE}`);
       const nextId = (m.length && m[0].values[0][0] != null ? m[0].values[0][0] : 0) + 1;
       db.run(
-        `INSERT INTO ${TABLE} (ID, Available, Completed, LevelName, LevelRequirements, TimesPlayed, TimesCompleted, Desc)
-         VALUES (:id, 1, 0, :p, :r, 0, 0, :d)`,
-        { ':id': nextId, ':p': levelPath, ':r': requirements, ':d': desc });
+        `INSERT INTO ${TABLE} (ID, Available, IAP_item_id, Completed, LevelName, LevelRequirements, TimesPlayed, TimesCompleted, Desc)
+         VALUES (:id, 1, :iap, 0, :p, :r, 0, 0, :d)`,
+        { ':id': nextId, ':iap': PACK, ':p': levelPath, ':r': requirements, ':d': desc });
     }
     return db.export();
   } finally {

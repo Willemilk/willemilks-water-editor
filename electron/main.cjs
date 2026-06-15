@@ -223,6 +223,12 @@ ipcMain.handle('playtest', async (_e, { apk, settings }) => {
       await run(adb, [...target, 'uninstall', pkg], 'Uninstalling old version').catch(() => {});
       await run(adb, [...target, 'install', signed], 'Installing on device (clean)');
     }
+    // Opt in: wipe the app's saved data so the game re-seeds water.db from the
+    // freshly installed APK. Needed for custom challenges to appear, because the
+    // game ignores the APK's db once it has copied one to writable storage.
+    if (s.resetData) {
+      await run(adb, [...target, 'shell', 'pm', 'clear', pkg], 'Clearing game data so new challenges load').catch(() => {});
+    }
     await run(adb, [...target, 'shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'], 'Launching game');
     logTo('done', 'Playtest build is running. Have fun!');
     return { ok: true };

@@ -782,6 +782,7 @@ const PT_DEFAULTS = {
   adbPath: 'adb',
   deviceAddr: '127.0.0.1:16384',
   packageName: 'com.disney.WMW',
+  resetData: false,
 };
 
 function playtestSettings() {
@@ -798,6 +799,9 @@ function showSettings() {
 
   const smart = el('input', { type: 'checkbox' });
   smart.checked = getPref('smartTerrain', true);
+
+  const resetData = el('input', { type: 'checkbox' });
+  resetData.checked = pt.resetData;
 
   const fields = {};
   const pathField = (key, labelKey, browseFilters, helpKey = null) => {
@@ -839,6 +843,9 @@ function showSettings() {
       pathField('deviceAddr', 'settings.device', null, 'help.device'),
       pathField('javaPath', 'settings.java', [{ name: 'java', extensions: ['exe', '*'] }], 'help.java'),
       pathField('packageName', 'settings.pkg', null),
+      el('label', { class: 'check-row' }, resetData, el('span', {},
+        el('strong', { text: t('settings.resetData') }),
+        el('span', { class: 'muted small', text: ' ' + t('settings.resetDataSub') }))),
       el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
         el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
         el('button', { class: 'btn primary', text: t('btn.save'), onclick: save }))
@@ -848,7 +855,10 @@ function showSettings() {
     setPref('smartTerrain', smart.checked);
     if (state.editor) state.editor.smartTerrain = smart.checked;
     window.native?.syncMenu?.('menu-smart', smart.checked);
-    setPref('playtest', Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])));
+    setPref('playtest', {
+      ...Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])),
+      resetData: resetData.checked,
+    });
     const newLang = langSel.value;
     overlay.remove();
     if (newLang !== currentLang()) {
