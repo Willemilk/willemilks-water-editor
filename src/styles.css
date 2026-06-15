@@ -880,6 +880,24 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   font-family: var(--mono); font-size: 12px; color: var(--text);
 }
 
+/* custom challenge builder */
+.challenge-box {
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid #f472b6;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 6px 11px 10px;
+  margin-bottom: 12px;
+}
+.challenge-box > summary { list-style: none; cursor: pointer; padding: 6px 0; user-select: none; }
+.challenge-box > summary::-webkit-details-marker { display: none; }
+.challenge-box > summary::before { content: '▸ '; font-size: 10px; color: #f472b6; }
+.challenge-box[open] > summary::before { content: '▾ '; }
+.ch-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #f472b6; }
+.ch-presets { margin: 6px 0; }
+.row.wrap { flex-wrap: wrap; }
+input.mono { font-family: var(--mono); font-size: 11px; }
+
 /* connection picking banner over the canvas */
 .connection-banner {
   position: absolute;

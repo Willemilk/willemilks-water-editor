@@ -3,6 +3,7 @@
 import { categorize } from '../core/objects.js';
 import { GRID_TO_PX, degToRad, groupColor } from '../core/coords.js';
 import { MATERIALS, nearestMaterial, materialForColor } from '../data/materials.js';
+import { CONDITIONS, FLUID_VALUES, DESC_KEYS, PRESETS, buildRequirements, conditionFor } from '../core/challenge.js';
 
 /** Every fluid the game ships levels with (found by scanning all 636 levels). */
 const FLUIDS = [
@@ -412,6 +413,7 @@ export class Inspector {
     if (!this.object) {
       this.container.replaceChildren(
         el('div', { class: 'inspector-empty' },
+          this._challengeSection(level),
           this._groupsOverview(level),
           el('h3', { text: t('insp.levelProps') }),
           this._kvEditor(level.properties, () => this.cb.onEdit()),
@@ -746,6 +748,78 @@ export class Inspector {
         class: 'btn small', text: t('group.controlWith'),
         onclick: () => this.cb.onPickController?.(obj),
       }));
+  }
+
+  /** Custom challenge builder for the level. Conditions map 1:1 to the real
+   *  game tokens; "Write to game" upserts them into water.db via the callbacks. */
+  _challengeSection(level) {
+    const ch = level.challenge || (level.challenge = { conditions: [], desc: '' });
+    const namesByKind = (kinds) => level.objects
+      .filter((o) => o.name && kinds.includes(this._objectKind(o)))
+      .map((o) => o.name);
+    const rerender = () => this.render();
+
+    const valueControl = (item) => {
+      const c = conditionFor(item.token);
+      if (!c || c.kind === 'flag') return el('span', { class: 'muted small', text: t('ch.flagOn') });
+      if (c.kind === 'int') {
+        return el('input', { type: 'number', step: '1', value: item.value ?? c.dflt ?? '0',
+          onchange: (e) => { item.value = e.target.value; rerender(); } });
+      }
+      const opts = c.kind === 'fluid' ? FLUID_VALUES : namesByKind(c.objKinds);
+      const list = opts.length ? opts : [''];
+      const cur = item.value ?? (c.kind === 'fluid' ? c.dflt : list[0]);
+      const sel = el('select', {}, ...list.map((v) => el('option', { value: v, text: v || t('ch.noObj'), selected: v === cur ? '' : null })));
+      sel.onchange = () => { item.value = sel.value; rerender(); };
+      return sel;
+    };
+
+    const condRow = (item, idx) => {
+      const typeSel = el('select', {}, ...CONDITIONS.map((cc) =>
+        el('option', { value: cc.token, text: cc.label, selected: cc.token === item.token ? '' : null })));
+      typeSel.onchange = () => {
+        const nc = conditionFor(typeSel.value);
+        item.token = typeSel.value;
+        item.value = nc.kind === 'flag' ? undefined
+          : (nc.kind === 'object' ? (namesByKind(nc.objKinds)[0] || '') : (nc.dflt || '0'));
+        rerender();
+      };
+      return el('div', { class: 'conn-row' }, typeSel, valueControl(item),
+        el('button', { class: 'icon-btn', html: '&times;', title: t('conn.clear'),
+          onclick: () => { ch.conditions.splice(idx, 1); rerender(); } }));
+    };
+
+    const reqStr = buildRequirements(ch.conditions);
+    const descSel = el('select', {}, ...DESC_KEYS.map((k) =>
+      el('option', { value: k, text: k, selected: k === ch.desc ? '' : null })));
+    descSel.onchange = () => { ch.desc = descSel.value; rerender(); };
+    const reqOut = el('input', { value: reqStr, readonly: '', class: 'mono', title: reqStr });
+
+    return el('details', { class: 'challenge-box', open: ch.conditions.length ? '' : null },
+      el('summary', {}, el('span', { class: 'ch-title', text: t('ch.title') })),
+      el('p', { class: 'muted small', text: t('ch.hint') }),
+      el('div', { class: 'ch-presets' },
+        el('label', { class: 'muted small', text: t('ch.presets') }),
+        el('div', { class: 'row gap wrap' }, ...PRESETS.map((p) =>
+          el('button', { class: 'btn small', text: p.label,
+            onclick: () => { ch.conditions = p.build(namesByKind); ch.desc = p.desc; rerender(); } })))),
+      el('div', { class: 'sep' }),
+      ch.conditions.length
+        ? el('div', {}, ...ch.conditions.map((item, i) => condRow(item, i)))
+        : el('p', { class: 'muted small', text: t('ch.none') }),
+      el('button', { class: 'btn small', text: '+ ' + t('ch.addCond'),
+        onclick: () => { ch.conditions.push({ token: 'ducks', value: '3' }); rerender(); } }),
+      el('div', { class: 'field' }, el('label', { text: t('ch.desc') }), descSel),
+      el('div', { class: 'field' }, el('label', { text: t('ch.requirements') }), reqOut),
+      el('div', { class: 'row gap wrap' },
+        el('button', { class: 'btn small primary', text: t('ch.write'),
+          onclick: (e) => this.cb.onChallengeWrite?.(reqStr, ch.desc, e.target) }),
+        el('button', { class: 'btn small', text: t('ch.load'),
+          onclick: () => this.cb.onChallengeLoad?.() }),
+        el('button', { class: 'btn small danger', text: t('ch.clear'),
+          onclick: () => { ch.conditions = []; rerender(); } })),
+      el('p', { class: 'muted small', text: t('ch.caveat') }),
+      el('div', { class: 'sep' }));
   }
 
   /** A friendly menu of every switch/generator group in the level. Each row is

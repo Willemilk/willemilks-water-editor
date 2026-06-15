@@ -46,7 +46,9 @@ src/core/terrain.js    pixel buffer, paint ops, smart rock rim pass
 src/core/apk.js        APK rebuild (verified against real base.apk)
 src/core/objects.js    .hs → .sprite → .imagelist → .webp resolver + categorize()
 src/core/png.js        custom indexed PNG encoder
-src/core/coords.js     coordinate math
+src/core/coords.js     coordinate math + groupColor()
+src/core/challenge.js  custom challenge condition catalog + requirements build/parse
+src/core/waterdb.js    lazy sql.js wrapper to read/write challenges in water.db
 src/core/export.js     level zip / xml / png / whole assets tree download
 src/ui/editor.js       canvas: tools, zoom/pan, drag, paths, connection overlay
 src/ui/panels.js       el(), LevelBrowser, ObjectBrowser, Inspector (smart sections)
@@ -80,6 +82,23 @@ Connections: `cb.onPickConnection(obj, propName)` writes the clicked target's na
 property; `cb.onPickController(target)` is the reverse (clicked switch/generator gets target
 appended to its next ConnectedObjectN). The canvas draws dashed arrows for all `Connected*`
 properties, switch/generator → object arrows colored per group (toggle: Connections).
+
+## Custom challenges (v1.5.0)
+The real game stores per level challenges in `assets/Data/water.db` (table
+`CrankyChallengeInfo`: LevelName, LevelRequirements, Desc). LevelRequirements is a
+space separated token string the native engine evaluates. The 14 real tokens are in
+`src/core/challenge.js` (ducks:N, crankyducks, swampyducks, nospout/noswitch/nopop/
+nofingerpop:ObjName, explosions:N, losefluid:water|ooze, yswitchcount:N, winwait:N,
+waitforwin:N, ignoremixing, noalgaeooze). Object tokens reference object NAMES in the
+level. New tokens would NOT be evaluated, so "new" challenges are PRESETS combining real
+tokens. The Challenge panel lives in the empty (level) inspector (`_challengeSection`).
+"Write to game" -> `onChallengeWrite` -> `waterdb.writeChallenge` (lazy sql.js, WASM
+bundled as its own chunk) -> `vfs._put('assets/Data/water.db', bytes)`, which the existing
+rebuild picks up via vfs.modified. The playtest pipeline is untouched. CAVEAT: the game
+copies water.db to writable storage on first run, so an existing install must clear its
+data once for new challenges to show. sql.js is lazy + guarded: if the WASM fails the
+editor still works and the user can copy the requirements string. Music per level and
+world image per level are NOT engine supported (music/background are per world pack).
 
 ## Known gotchas
 - window.prompt() does not work in Electron → use modalPrompt() in src/main.js.

@@ -1,7 +1,7 @@
 {
   "name": "willemilks-water-editor",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "A modern level editor for Where's My Water? with full terrain painting. Runs as a desktop app (Electron) or in the browser.",
   "type": "module",
   "main": "electron/main.cjs",
@@ -23,7 +23,8 @@
   "author": "Willemilk",
   "license": "MIT",
   "dependencies": {
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
     "electron": "^33.2.0",

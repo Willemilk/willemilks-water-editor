@@ -10,6 +10,7 @@ import { LevelBrowser, ObjectBrowser, Inspector, materialPalette, propertySugges
 import { startTutorial, shouldShowTutorial, toast } from './ui/tutorial.js';
 import { DEFAULT_LEVEL_WIDTH, DEFAULT_LEVEL_HEIGHT } from './data/materials.js';
 import { rebuildApk } from './core/apk.js';
+import { parseRequirements } from './core/challenge.js';
 import { t, getPref, setPref, setLang, currentLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
@@ -341,6 +342,8 @@ function renderEditor() {
       inspector.setObject(obj);
       state.editor.requestRender();
     },
+    onChallengeWrite: (requirements, desc, btn) => writeChallengeToGame(requirements, desc, btn),
+    onChallengeLoad: () => loadChallengeFromGame(),
     onDelete: (obj) => {
       state.level.pushUndo();
       state.level.removeObject(obj);
@@ -399,6 +402,65 @@ function onBeforeUnload(e) {
 function cancelConnectionPick() {
   if (state.editor) state.editor.pickObjectMode = null;
   document.getElementById('connection-banner')?.classList.add('hidden');
+}
+
+// ---------------- custom challenges (water.db) ----------------
+
+/** The game's level key for the open level, e.g. "/Levels/drain_it_first". */
+function levelGamePath(level) {
+  const m = (level?.xmlPath || '').match(/(Levels\/.+?)\.xml$/i);
+  return m ? '/' + m[1] : null;
+}
+
+/** Locate water.db inside the loaded APK (skips the Lite/demo variants). */
+function waterDbPath(vfs) {
+  if (!vfs) return null;
+  if (vfs.has('assets/Data/water.db')) return 'assets/Data/water.db';
+  for (const key of vfs.files.keys()) {
+    if (/(^|\/)data\/water\.db$/.test(key)) return vfs.originalNames.get(key);
+  }
+  return null;
+}
+
+async function writeChallengeToGame(requirements, desc, btn) {
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
+  const path = waterDbPath(state.vfs);
+  if (!path) return toast(t('ch.noDb'), 'err', 6000);
+  const levelPath = levelGamePath(state.level);
+  if (!levelPath) return toast(t('ch.noLevelPath'), 'err', 5000);
+  if (!requirements.trim()) return toast(t('ch.empty'), 'warn', 4000);
+  if (btn) btn.disabled = true;
+  try {
+    const { writeChallenge } = await import('./core/waterdb.js');
+    const newBytes = await writeChallenge(state.vfs.read(path), levelPath, requirements, desc || 'CHALLENGE_CRANKY_DUCKS');
+    state.vfs._put(path, newBytes);
+    markDirty();
+    toast(t('ch.wrote'), 'ok', 4000);
+  } catch (err) {
+    console.error('challenge write failed', err);
+    toast(t('ch.dbFail'), 'err', 8000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function loadChallengeFromGame() {
+  if (!state.vfs || !state.level) return;
+  const path = waterDbPath(state.vfs);
+  if (!path) return toast(t('ch.noDb'), 'err', 6000);
+  const levelPath = levelGamePath(state.level);
+  if (!levelPath) return toast(t('ch.noLevelPath'), 'err', 5000);
+  try {
+    const { readChallenge } = await import('./core/waterdb.js');
+    const existing = await readChallenge(state.vfs.read(path), levelPath);
+    if (!existing) return toast(t('ch.noChallenge'), 'warn', 4000);
+    state.level.challenge = { conditions: parseRequirements(existing.requirements), desc: existing.desc };
+    state.inspector.render();
+    toast(t('ch.loaded'), 'ok', 3000);
+  } catch (err) {
+    console.error('challenge read failed', err);
+    toast(t('ch.dbFail'), 'err', 8000);
+  }
 }
 
 import { nearestMaterial as _nm, materialForColor as _mfc } from './data/materials.js';
