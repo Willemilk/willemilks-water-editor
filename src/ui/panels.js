@@ -3,7 +3,7 @@
 import { categorize } from '../core/objects.js';
 import { GRID_TO_PX, degToRad, groupColor } from '../core/coords.js';
 import { MATERIALS, nearestMaterial, materialForColor } from '../data/materials.js';
-import { CONDITIONS, FLUID_VALUES, DESC_KEYS, PRESETS, buildRequirements, conditionFor } from '../core/challenge.js';
+import { CONDITIONS, FLUID_VALUES, DESC_KEYS, buildRequirements, conditionFor } from '../core/challenge.js';
 
 /** Every fluid the game ships levels with (found by scanning all 636 levels). */
 const FLUIDS = [
@@ -798,12 +798,6 @@ export class Inspector {
     return el('details', { class: 'challenge-box', open: ch.conditions.length ? '' : null },
       el('summary', {}, el('span', { class: 'ch-title', text: t('ch.title') })),
       el('p', { class: 'muted small', text: t('ch.hint') }),
-      el('div', { class: 'ch-presets' },
-        el('label', { class: 'muted small', text: t('ch.presets') }),
-        el('div', { class: 'row gap wrap' }, ...PRESETS.map((p) =>
-          el('button', { class: 'btn small', text: p.label,
-            onclick: () => { ch.conditions = p.build(namesByKind); ch.desc = p.desc; rerender(); } })))),
-      el('div', { class: 'sep' }),
       ch.conditions.length
         ? el('div', {}, ...ch.conditions.map((item, i) => condRow(item, i)))
         : el('p', { class: 'muted small', text: t('ch.none') }),
