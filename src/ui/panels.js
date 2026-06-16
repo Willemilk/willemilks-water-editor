@@ -622,22 +622,7 @@ export class Inspector {
       s.onchange = () => set(key, s.value);
       return el('div', { class: 'field' }, el('label', { text: t(labelKey, labelParams) }), s);
     };
-    // Draggable alone does nothing in game: the engine only reacts to touch
-    // when Interactive is on too (and e.g. bomb.hs does not author it)
-    const dragChk = () => {
-      const c = el('input', { type: 'checkbox' });
-      c.checked = obj.properties.Draggable === '1' || obj.properties.Draggable === 'true';
-      c.onchange = () => {
-        this.cb.push();
-        obj.properties.Draggable = c.checked ? '1' : '0';
-        if (c.checked && obj.properties.Interactive === undefined) obj.properties.Interactive = '1';
-        this.cb.onEdit();
-      };
-      return el('div', { class: 'field' },
-        el('label', { class: 'check-row' }, c, el('span', { text: t('prop.draggable') })),
-        el('span', { class: 'muted small', text: t('prop.dragHint') }));
-    };
-    return { set, num, chk, sel, dragChk };
+    return { set, num, chk, sel };
   }
 
   _section(kind, titleKey, ...children) {
@@ -648,13 +633,12 @@ export class Inspector {
   }
 
   _bombSection(obj) {
-    const { num, dragChk } = this._controls(obj);
+    const { num } = this._controls(obj);
     return this._section('bomb', 'sec.bomb',
       el('div', { class: 'row gap' },
         num('BlastRadius', 'prop.blastRadius', '5', '0.5'),
         num('BlastPower', 'prop.blastPower', '4000', '100')),
-      num('GravityScale', 'prop.gravity', '0', '0.1'),
-      dragChk());
+      num('GravityScale', 'prop.gravity', '0', '0.1'));
   }
 
   _fanSection(obj) {
@@ -700,7 +684,7 @@ export class Inspector {
   }
 
   _balloonSection(obj) {
-    const { num, chk, dragChk } = this._controls(obj);
+    const { num, chk } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
     // InitialParticles is "<fluid> <count>" in the game ("water 70", "Steam 50", …)
     const init = String(obj.properties.InitialParticles || defaults.InitialParticles || 'water 10').trim().split(/\s+/);
@@ -729,8 +713,7 @@ export class Inspector {
       num('GravityScale', 'prop.buoyancy', '', '0.1'),
       num('VelDamping', 'prop.damping', '', '0.01'),
       hasPerryFlags ? chk('HasString', 'prop.hasString') : null,
-      hasPerryFlags ? chk('FingerPoppable', 'prop.poppable') : null,
-      dragChk());
+      hasPerryFlags ? chk('FingerPoppable', 'prop.poppable') : null);
   }
 
   _connSlots(obj, prefix) {
@@ -830,15 +813,26 @@ export class Inspector {
       return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
     };
 
-    // time limit = BonusTimer (+ BonusLevel, which the timer needs)
+    // Time limit. In every one of the 636 real levels BonusTimer travels
+    // together with BonusLevel=1, and no level ever has one without the other.
+    // So the timer owns both: turning it off clears BOTH. Leaving BonusLevel=1
+    // behind made a "bonus level with no timer", a state the game never ships
+    // and that can crash on load.
     const hasTimer = p.BonusTimer != null && p.BonusTimer !== '';
     const timerChk = el('input', { type: 'checkbox' });
     timerChk.checked = hasTimer;
     const secInp = el('input', { type: 'number', min: '1', step: '5', value: hasTimer ? p.BonusTimer : '60' });
     const applyTimer = () => {
       this.cb.push();
-      if (timerChk.checked) { p.BonusTimer = String(parseInt(secInp.value, 10) || 60); p.BonusLevel = '1'; }
-      else { delete p.BonusTimer; }
+      if (timerChk.checked) {
+        const secs = Math.max(1, parseInt(secInp.value, 10) || 60);
+        secInp.value = String(secs);
+        p.BonusTimer = String(secs);
+        p.BonusLevel = '1';
+      } else {
+        delete p.BonusTimer;
+        delete p.BonusLevel;
+      }
       commit(); rerender();
     };
     timerChk.onchange = applyTimer;
@@ -863,6 +857,7 @@ export class Inspector {
         el('div', { class: 'row gap', style: 'align-items:center' },
           el('label', { class: 'check-row' }, timerChk, el('span', { text: t('lset.timer') })),
           hasTimer ? secInp : null),
+        hasTimer ? el('p', { class: 'muted small', text: t('lset.timerHint') }) : null,
         boolRow('HeavyIntro', 'lset.heavyIntro'),
         el('div', { class: 'field' }, el('label', { text: t('lset.introSpeed') }), speed),
         boolRow('ReversePan', 'lset.reversePan'),
@@ -870,8 +865,7 @@ export class Inspector {
         boolRow('ShowTopEdge', 'lset.topEdge'),
         boolRow('ShowBottomEdge', 'lset.bottomEdge'),
         boolRow('WaterTurnsIntoMud', 'lset.waterToMud'),
-        boolRow('MysteryLevel', 'lset.mystery'),
-        boolRow('BonusLevel', 'lset.bonus')),
+        boolRow('MysteryLevel', 'lset.mystery')),
       extras.length
         ? el('div', { class: 'kv' }, ...extras.map((k) => el('div', { class: 'kv-row' },
             el('span', { class: 'kv-key', title: k, text: k }),
@@ -999,9 +993,8 @@ export class Inspector {
   }
 
   _brokenpipeSection(obj) {
-    const { num, dragChk } = this._controls(obj);
+    const { num } = this._controls(obj);
     return this._section('brokenpipe', 'sec.brokenpipe',
-      dragChk(),
       num('GravityScale', 'prop.gravity', '0', '0.1'));
   }
 
@@ -1158,6 +1151,8 @@ export class Inspector {
     const defaults = this.cb.getDefaults?.(obj) || {};
     const effType = obj.properties.SpoutType || defaults.SpoutType || 'OpenSpout';
     const effFluid = String(obj.properties.FluidType || defaults.FluidType || 'Water').toLowerCase();
+    // basic_drain.hs is the level exit, the drain the player has to get water to
+    const isExitDrain = /basic_drain/i.test(obj.properties.Filename || '');
 
     const behavior = el('select', {},
       ...[['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')],
@@ -1230,6 +1225,11 @@ export class Inspector {
 
     return el('div', { class: 'spout-box' },
       el('h4', { text: t('spout.title') }),
+      isExitDrain
+        ? el('div', { class: 'smart-box', style: 'border-left-color:#34d399; margin:0 0 8px' },
+            el('strong', { text: t('spout.exitDrain') }),
+            el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('spout.exitDrainHint') }))
+        : null,
       el('div', { class: 'field' }, el('label', { text: t('spout.behavior') }), behavior),
       el('div', { class: 'field' }, el('label', { text: t('spout.fluid') }), fluid),
       el('div', { class: 'row gap' },
