@@ -281,6 +281,7 @@ function renderEditor() {
 
   const levelBrowser = new LevelBrowser(document.getElementById('level-panel'), openLevel);
   levelBrowser.setLevels(state.levels);
+  levelBrowser.setCustomWorlds(getPref('customWorlds', []));
   state.levelBrowser = levelBrowser;
 
   const objectBrowser = new ObjectBrowser(document.getElementById('object-panel'), state.resolver, (item) => {
@@ -854,6 +855,16 @@ function showSettings() {
       el('label', { class: 'check-row' }, unlockAll, el('span', {},
         el('strong', { text: t('settings.unlockAll') }),
         el('span', { class: 'muted small', text: ' ' + t('settings.unlockAllSub') }))),
+      el('div', { class: 'sep' }),
+      el('h4', { text: t('reset.title') }),
+      el('p', { class: 'muted small', text: t('reset.hint') }),
+      el('div', { class: 'row gap wrap' },
+        el('button', { class: 'btn small', text: t('reset.challenges'),
+          onclick: () => { if (confirm(t('reset.confirm'))) resetDatabase('challenges'); } }),
+        el('button', { class: 'btn small', text: t('reset.worlds'),
+          onclick: () => { if (confirm(t('reset.confirm'))) resetDatabase('worlds'); } }),
+        el('button', { class: 'btn small danger', text: t('reset.all'),
+          onclick: () => { if (confirm(t('reset.confirmAll'))) resetDatabase('all'); } })),
       el('div', { class: 'row gap', style: 'justify-content: flex-end; margin-top: 12px' },
         el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
         el('button', { class: 'btn primary', text: t('btn.save'), onclick: save }))
@@ -919,6 +930,42 @@ async function applyAllWorlds() {
   return worlds.length;
 }
 
+/** Pristine water.db straight from the untouched original APK (or null). */
+async function pristineWaterDb() {
+  if (!state.vfs?.sourceApk) return null;
+  const { unzipSync } = await import('fflate');
+  const out = unzipSync(state.vfs.sourceApk.data, { filter: (f) => /(^|\/)data\/water\.db$/i.test(f.name) });
+  const key = Object.keys(out).find((k) => /water\.db$/i.test(k));
+  return key ? out[key] : null;
+}
+
+/** Reset the game database. what: 'all' | 'challenges' | 'worlds'. */
+async function resetDatabase(what) {
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
+  const dbPath = waterDbPath(state.vfs);
+  if (!dbPath) return toast(t('ch.noDb'), 'err', 5000);
+  try {
+    if (what === 'worlds') {
+      const { clearCustomWorlds } = await import('./core/waterdb.js');
+      state.vfs._put(dbPath, await clearCustomWorlds(state.vfs.read(dbPath)));
+      setPref('customWorlds', []);
+    } else if (what === 'challenges') {
+      const pristine = await pristineWaterDb();
+      if (!pristine) throw new Error('original water.db not available');
+      const { restoreChallenges } = await import('./core/waterdb.js');
+      state.vfs._put(dbPath, await restoreChallenges(state.vfs.read(dbPath), pristine));
+    } else {
+      const pristine = await pristineWaterDb();
+      if (!pristine) throw new Error('original water.db not available');
+      state.vfs._put(dbPath, pristine);
+      setPref('customWorlds', []);
+    }
+    state.levelBrowser?.setCustomWorlds(getPref('customWorlds', []));
+    markDirty();
+    toast(t('reset.done'), 'ok', 4000);
+  } catch (e) { console.error(e); toast(t('reset.fail'), 'err', 7000); }
+}
+
 function showWorldBuilder() {
   if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
   document.querySelector('.modal-overlay')?.remove();
@@ -935,6 +982,7 @@ function showWorldBuilder() {
     [list[i], list[j]] = [list[j], list[i]];
     setPref('customWorlds', list);
     try { await applyAllWorlds(); markDirty(); } catch (e) { console.error(e); }
+    state.levelBrowser?.setCustomWorlds(getPref('customWorlds', []));
     render();
   }
 
@@ -995,6 +1043,7 @@ function showWorldBuilder() {
       setPref('customWorlds', list);
       try { await applyAllWorlds(); markDirty(); toast(t('world.saved'), 'ok', 4000); }
       catch (e) { console.error(e); toast(t('ch.dbFail'), 'err', 7000); }
+      state.levelBrowser?.setCustomWorlds(getPref('customWorlds', []));
       overlay.remove();
     };
 
@@ -1019,6 +1068,7 @@ function showWorldBuilder() {
                     const p = waterDbPath(state.vfs);
                     if (p && rm) { state.vfs._put(p, await removeWorld(state.vfs.read(p), rm.packName)); markDirty(); }
                   } catch (e) { console.error(e); }
+                  state.levelBrowser?.setCustomWorlds(getPref('customWorlds', []));
                   editing = null; render();
                 },
               }))))

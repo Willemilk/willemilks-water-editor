@@ -78,9 +78,16 @@ export class LevelBrowser {
     this.container = container;
     this.onOpen = onOpen;
     this.levels = [];
+    this.customWorlds = [];
     this.activeName = null;
     this.filter = '';
     this.openPacks = new Set(['pack0']); // first world open by default
+  }
+
+  /** Custom worlds (from the world builder) shown under their character. */
+  setCustomWorlds(worlds) {
+    this.customWorlds = worlds || [];
+    if (this.levels.length) this.setLevels(this.levels);
   }
 
   setLevels(levels) {
@@ -98,6 +105,22 @@ export class LevelBrowser {
         placed.add(entry.name.toLowerCase());
       }
       if (entries.length) this.packs.push({ title: pack.title, character: pack.character, entries });
+    }
+    // splice custom worlds in right after the last pack of their character
+    const STORYLINE_CHAR = { 0: 'Swampy', 1: 'Cranky', 3: 'Mystery Duck', 6: 'Allie' };
+    for (const w of this.customWorlds) {
+      const character = STORYLINE_CHAR[w.storyline ?? 0] || 'Swampy';
+      const entries = [];
+      for (const lv of (w.levels || [])) {
+        const base = String(lv.filename || '').split('/').pop().toLowerCase();
+        const entry = this.byName.get(base);
+        if (entry) entries.push({ entry, title: entry.name });
+      }
+      if (!entries.length) continue;
+      const pack = { title: w.displayName, character, entries, custom: true };
+      let idx = -1;
+      for (let i = 0; i < this.packs.length; i++) if (this.packs[i].character === character) idx = i;
+      if (idx >= 0) this.packs.splice(idx + 1, 0, pack); else this.packs.push(pack);
     }
     const rest = levels
       .filter((l) => !placed.has(l.name.toLowerCase()))
@@ -179,7 +202,9 @@ export class LevelBrowser {
         open: this.openPacks.has(id) ? '' : null,
         ontoggle: (e) => { e.target.open ? this.openPacks.add(id) : this.openPacks.delete(id); },
       },
-        el('summary', {}, el('span', { text: pack.title }), el('span', { class: 'count', text: pack.entries.length })),
+        el('summary', {}, el('span', { text: pack.title }),
+          pack.custom ? el('span', { class: 'tag', text: t('world.tag') }) : null,
+          el('span', { class: 'count', text: pack.entries.length })),
         el('div', { class: 'list' }, ...pack.entries.map((item, n) => this._row(item, n + 1)))
       );
       sections.push(details);

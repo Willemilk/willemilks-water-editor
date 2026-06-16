@@ -102,12 +102,17 @@ export async function createWorld(dbBytes, world) {
         ':icon': world.packIcon || 'world_select_00', ':sl': sl, ':name': world.displayName || world.packName });
     let lid = ((db.exec('SELECT MAX(ID) FROM LevelInfo')[0]?.values[0][0]) || 0) + 1;
     for (const lv of (world.levels || []).slice(0, 20)) {
+      // Reuse the level's real title key (LN_*) from its original LevelInfo row so
+      // the game shows a proper name. A made up name is not in the engine's loc
+      // table, which is why the title showed up with the "*S*" missing string mark.
+      const orig = db.exec('SELECT Name FROM LevelInfo WHERE Filename = :fn COLLATE NOCASE LIMIT 1', { ':fn': lv.filename });
+      const nm = (orig.length && orig[0].values.length && orig[0].values[0][0]) ? orig[0].values[0][0] : (lv.name || '');
       db.run(
         `INSERT INTO LevelInfo (ID, Name, Filename, Stars, PackName, TimesPlayed, TimesFinished,
           Unlocked, ParTime, BestScore, CollectibleFound, PlayTime, TimesRetried, IgnoreInStarCount,
           Type, Available, IsBonus)
          VALUES (:id, :nm, :fn, 0, :p, 0, 0, 1, :par, 0, -1, 0, 0, 0, 0, 1, 0)`,
-        { ':id': lid++, ':nm': lv.name, ':fn': lv.filename, ':p': world.packName, ':par': lv.parTime || 60 });
+        { ':id': lid++, ':nm': nm, ':fn': lv.filename, ':p': world.packName, ':par': lv.parTime || 60 });
     }
     return db.export();
   } finally {
@@ -139,6 +144,27 @@ export async function removeWorld(dbBytes, packName) {
     return db.export();
   } finally {
     db.close();
+  }
+}
+
+/** Restore the challenge table to a pristine copy (undoes custom challenges). */
+export async function restoreChallenges(currentBytes, pristineBytes) {
+  const SQL = await getSQL();
+  const cur = new SQL.Database(new Uint8Array(currentBytes));
+  const pri = new SQL.Database(new Uint8Array(pristineBytes));
+  try {
+    cur.run(`DELETE FROM ${TABLE}`);
+    const cols = 'ID, Available, IAP_item_id, Completed, LevelName, LevelRequirements, TimesPlayed, TimesCompleted, Desc';
+    const res = pri.exec(`SELECT ${cols} FROM ${TABLE}`);
+    if (res.length) {
+      for (const row of res[0].values) {
+        cur.run(`INSERT INTO ${TABLE} (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, row);
+      }
+    }
+    return cur.export();
+  } finally {
+    cur.close();
+    pri.close();
   }
 }
 
