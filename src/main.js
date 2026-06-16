@@ -887,6 +887,8 @@ function showSettings() {
 const WORLD_ICONS = ['world_select_00', 'world_select_01', 'world_select_02', 'world_select_03',
   'world_select_04', 'world_select_05', 'world_select_06', 'world_select_07', 'world_select_08'];
 const WORLD_TILES = ['tile_yellow', 'tile_purple', 'tile_green', 'tile_magenta'];
+// storyline value -> which character's world select the pack shows up in
+const WORLD_CHARS = [[0, 'world.char.swampy'], [1, 'world.char.cranky'], [3, 'world.char.mystery'], [6, 'world.char.allie']];
 
 /** "/Levels/foo" for a level browser entry, used as the LevelInfo Filename. */
 function levelFilename(entry) {
@@ -901,8 +903,10 @@ async function applyAllWorlds() {
   if (!worlds.length) return 0;
   const dbPath = waterDbPath(state.vfs);
   if (!dbPath) throw new Error('water.db not found');
-  const { createWorld } = await import('./core/waterdb.js');
-  let bytes = state.vfs.read(dbPath);
+  const { createWorld, clearCustomWorlds } = await import('./core/waterdb.js');
+  let bytes = await clearCustomWorlds(state.vfs.read(dbPath));
+  // apply in array order so each world's pack ID (and thus its place in the row)
+  // follows the order shown in the builder
   for (const w of worlds) {
     if (w.iconData) {
       const raw = Uint8Array.from(atob(w.iconData), (ch) => ch.charCodeAt(0));
@@ -924,10 +928,22 @@ function showWorldBuilder() {
   const card = el('div', { class: 'welcome-card modal-card settings-card' });
   overlay.append(card);
 
+  async function reorderWorld(i, dir) {
+    const list = getPref('customWorlds', []);
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    setPref('customWorlds', list);
+    try { await applyAllWorlds(); markDirty(); } catch (e) { console.error(e); }
+    render();
+  }
+
   function render() {
     const worlds = getPref('customWorlds', []);
     const cur = editing != null ? worlds[editing] : null;
     const nameInp = el('input', { type: 'text', placeholder: t('world.namePh'), value: cur ? cur.displayName : '' });
+    const charSel = el('select', {}, ...WORLD_CHARS.map(([v, lk]) =>
+      el('option', { value: String(v), text: t(lk), selected: cur && (cur.storyline ?? 0) === v ? '' : null })));
     const iconSel = el('select', {}, ...WORLD_ICONS.map((ic) => el('option', { value: ic, text: ic, selected: cur && cur.packIcon === ic ? '' : null })));
     const tileSel = el('select', {}, ...WORLD_TILES.map((tt) => el('option', { value: tt, text: tt, selected: cur && cur.tileTexture === tt ? '' : null })));
     const iconFile = el('input', { type: 'file', accept: 'image/png,image/webp,image/jpeg' });
@@ -963,7 +979,8 @@ function showWorldBuilder() {
       const existing = editing != null ? list[editing] : null;
       const packName = existing?.packName || ('LP_CUSTOM_' + Date.now().toString(36));
       const def = {
-        packName, displayName: name, tileTexture: tileSel.value, packIcon: iconSel.value,
+        packName, displayName: name, storyline: parseInt(charSel.value, 10) || 0,
+        tileTexture: tileSel.value, packIcon: iconSel.value,
         iconData: existing?.iconData || null,
         levels: [...picked].map((fn) => ({ name: fn.split('/').pop(), filename: fn })),
       };
@@ -987,6 +1004,8 @@ function showWorldBuilder() {
       worlds.length
         ? el('div', { class: 'world-list' }, ...worlds.map((w, i) =>
             el('div', { class: 'world-row' },
+              el('button', { class: 'icon-btn', title: t('world.up'), html: '&uarr;', disabled: i === 0 ? '' : null, onclick: () => reorderWorld(i, -1) }),
+              el('button', { class: 'icon-btn', title: t('world.down'), html: '&darr;', disabled: i === worlds.length - 1 ? '' : null, onclick: () => reorderWorld(i, 1) }),
               el('span', { class: 'grow', text: `${w.displayName} · ${w.levels.length}` }),
               el('button', { class: 'btn small', text: t('world.edit'), onclick: () => { editing = i; render(); } }),
               el('button', {
@@ -1007,6 +1026,7 @@ function showWorldBuilder() {
       el('div', { class: 'sep' }),
       el('h4', { text: cur ? t('world.editing') : t('world.new') }),
       el('div', { class: 'field' }, el('label', { text: t('world.name') }), nameInp),
+      el('div', { class: 'field' }, el('label', { text: t('world.character') }), charSel),
       el('div', { class: 'row gap' },
         el('div', { class: 'field grow' }, el('label', { text: t('world.icon') }), iconSel),
         el('div', { class: 'field grow' }, el('label', { text: t('world.tile') }), tileSel)),

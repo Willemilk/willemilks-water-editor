@@ -64,6 +64,9 @@ export async function unlockEverything(dbBytes) {
   try {
     db.run('UPDATE LevelInfo SET Unlocked = 1, Available = 1');
     db.run('UPDATE LevelPackInfo SET Unlocked = 1, Bought = 1, LS_Unlocked = 1');
+    // the per character hubs (Swampy/Cranky/Mystery/Allie) gate the other
+    // storylines; unlock them too or only Swampy stays reachable
+    try { db.run('UPDATE HubInfo SET Unlocked = 1, Bought = 1'); } catch { /* older db */ }
     return db.export();
   } finally {
     db.close();
@@ -71,10 +74,12 @@ export async function unlockEverything(dbBytes) {
 }
 
 /**
- * Create (or replace) a custom Swampy world in water.db. Adds a LevelPackInfo
- * row (Storyline 0 so it sits with Swampy's worlds, Unlocked, no star gate) and
- * a LevelInfo row per level so the game lists them. Idempotent per packName.
- * world = { packName, displayName, tileTexture, packIcon, levels: [{name, filename, parTime}] }
+ * Create (or replace) a custom world in water.db. Adds a LevelPackInfo row plus a
+ * LevelInfo row per level so the game lists them. The pack ID is chosen to sit
+ * right after that storyline's built in worlds but BEFORE the "more worlds"
+ * upsell tile (ID 100) — a pack after the upsell is shown but never opens.
+ * Storyline: 0 Swampy, 1 Cranky, 3 Mystery, 6 Allie. Idempotent per packName.
+ * world = { packName, displayName, storyline, tileTexture, packIcon, levels: [{name, filename, parTime}] }
  */
 export async function createWorld(dbBytes, world) {
   const SQL = await getSQL();
@@ -82,15 +87,19 @@ export async function createWorld(dbBytes, world) {
   try {
     db.run('DELETE FROM LevelInfo WHERE PackName = :p', { ':p': world.packName });
     db.run('DELETE FROM LevelPackInfo WHERE PackName = :p', { ':p': world.packName });
-    const packId = ((db.exec('SELECT MAX(ID) FROM LevelPackInfo')[0]?.values[0][0]) || 100) + 1;
+    const sl = world.storyline ?? 0;
+    // next free slot after this storyline's real worlds, kept under the upsell
+    const m = db.exec('SELECT MAX(ID) FROM LevelPackInfo WHERE Storyline = :s AND ID < 100', { ':s': sl });
+    const base = (m.length && m[0].values.length && m[0].values[0][0] != null) ? m[0].values[0][0] : 19;
+    const packId = base + 1;
     db.run(
       `INSERT INTO LevelPackInfo (ID, PackName, Unlocked, HasPlayed, StarsRequired, TileTexture,
         LightingColor, CurtainTexture, LockColor, PackType, Hidden, PackIcon, Storyline,
         IAP_item_id, Bought, FB_AlbumName, DisplayPackName, LS_Unlocked, GrayType)
        VALUES (:id, :p, 1, 0, 0, :tile, '188 153 71', 'shower_curtain_01', '255 255 255', 0, 0,
-        :icon, 0, '', 1, :name, :name, 1, 0)`,
+        :icon, :sl, '', 1, :name, :name, 1, 0)`,
       { ':id': packId, ':p': world.packName, ':tile': world.tileTexture || 'tile_yellow',
-        ':icon': world.packIcon || 'world_select_00', ':name': world.displayName || world.packName });
+        ':icon': world.packIcon || 'world_select_00', ':sl': sl, ':name': world.displayName || world.packName });
     let lid = ((db.exec('SELECT MAX(ID) FROM LevelInfo')[0]?.values[0][0]) || 0) + 1;
     for (const lv of (world.levels || []).slice(0, 20)) {
       db.run(
@@ -100,6 +109,20 @@ export async function createWorld(dbBytes, world) {
          VALUES (:id, :nm, :fn, 0, :p, 0, 0, 1, :par, 0, -1, 0, 0, 0, 0, 1, 0)`,
         { ':id': lid++, ':nm': lv.name, ':fn': lv.filename, ':p': world.packName, ':par': lv.parTime || 60 });
     }
+    return db.export();
+  } finally {
+    db.close();
+  }
+}
+
+/** Remove every custom world so applyAllWorlds can rebuild them with stable IDs. */
+export async function clearCustomWorlds(dbBytes) {
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(dbBytes));
+  try {
+    // the literal "CUSTOM" means the _ wildcards never hit a built in pack
+    db.run("DELETE FROM LevelInfo WHERE PackName LIKE 'LP_CUSTOM_%'");
+    db.run("DELETE FROM LevelPackInfo WHERE PackName LIKE 'LP_CUSTOM_%'");
     return db.export();
   } finally {
     db.close();

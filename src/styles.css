@@ -748,7 +748,7 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   font-size: 13.5px;
   margin: 4px 0;
 }
-.check-row input { margin-top: 3px; accent-color: var(--accent); }
+.check-row input { margin-top: 3px; accent-color: var(--accent); flex: 0 0 auto; width: 15px; height: 15px; }
 
 /* playtest log */
 .pt-card { width: min(620px, calc(100vw - 32px)); }
