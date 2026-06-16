@@ -12,6 +12,8 @@ export const MATERIALS = [
   { id: 'poison',    name: 'Poison',          rgb: [139, 25, 135],  dig: false, desc: 'Pre-placed contaminated water.' },
   { id: 'ooze',      name: 'Ooze',            rgb: [190, 101, 47],  dig: false, desc: 'Pre-placed ooze (lava).' },
   { id: 'algae',     name: 'Algae',           rgb: [25, 139, 38],   dig: false, desc: 'Grows when watered; absorbs fluids.' },
+  { id: 'coal',      name: 'Coal',            rgb: [178, 8, 21],    dig: false, desc: 'Turns water into steam on contact (verified in burning_hot_coals).' },
+  { id: 'steam',     name: 'Steam',           rgb: [0, 3, 143],     dig: false, desc: 'Pre-placed steam gas (verified in drilling_for_steam).' },
   { id: 'room',      name: "Swampy's room",   rgb: [255, 234, 0],   dig: false, desc: 'Marks the room/bathtub area (yellow).' },
 ];
 

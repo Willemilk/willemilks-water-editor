@@ -23,7 +23,9 @@ the MuMu emulator with the edits in it. VERIFIED WORKING ON REAL HARDWARE. Do no
 - APK REBUILD (src/core/apk.js): strips META-INF/*, keeps resources.arsc STORED
   (uncompressed) — deflating it crashes the game natively. Untouched files stay byte identical.
 - Terrain materials are identified by exact RGB (src/data/materials.js). MATERIAL_ALIASES
-  maps shipped color variants (e.g. 112,91,49 → dirt, 41,41,41 → rock shadow).
+  maps shipped color variants (e.g. 112,91,49 → dirt, 41,41,41 → rock shadow). Coal is
+  178,8,21 (turns water to steam) and pre placed Steam is 0,3,143 — both verified by
+  scanning burning_hot_coals / drilling_for_steam level PNGs, both paintable.
 
 ## Commands
 ```

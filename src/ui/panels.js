@@ -39,6 +39,13 @@ const GNOME_TYPES = [
   ['sludge', 'gnome.sludge'],
 ];
 
+// properties that are really yes/no, so the raw editor shows a toggle not a box
+const PROP_BOOL = new Set([
+  'Draggable', 'Interactive', 'MotorOn', 'MotorPingPong', 'MotorEase', 'VacuumOn',
+  'HasString', 'FingerPoppable', 'PathIsClosed', 'PathIsGlobal', 'ShowTopEdge',
+  'HeavyIntro', 'IgnoreInEditorObjectSelect', 'IgnoreMixing', 'Goal',
+]);
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -438,11 +445,11 @@ export class Inspector {
     if (!this.object) {
       this.container.replaceChildren(
         el('div', { class: 'inspector-empty' },
-          this._challengeSection(level),
-          this._groupsOverview(level),
-          el('h3', { text: t('insp.levelProps') }),
+          el('h3', { text: t('insp.levelSettings') }),
           this._kvEditor(level.properties, () => this.cb.onEdit()),
           el('div', { class: 'sep' }),
+          this._challengeSection(level),
+          this._groupsOverview(level),
           el('h3', { text: t('insp.levelStats') }),
           this._stats(level),
           el('p', { class: 'muted small', text: t('insp.empty') })
@@ -645,9 +652,6 @@ export class Inspector {
 
   _vacuumSection(obj) {
     const { num, chk } = this._controls(obj);
-    // a vacuum drain also removes fluid; that drain side is niche, so it stays
-    // in Advanced and we only show a short note instead of a full spout panel
-    const alsoDrain = (obj.type || '').toLowerCase() === 'spout' || 'SpoutType' in obj.properties;
     return this._section('vacuum', 'sec.vacuum',
       this._controlledByBlock(obj),
       chk('VacuumOn', 'prop.vacuumOn'),
@@ -658,7 +662,20 @@ export class Inspector {
         num('VacuumMinAngle', 'prop.vacuumAngleMin', '', '5'),
         num('VacuumMaxAngle', 'prop.vacuumAngleMax', '', '5')),
       num('VacuumFriction', 'prop.vacuumFriction', '', '0.05'),
-      alsoDrain ? el('p', { class: 'muted small', text: t('vacuum.drainNote') }) : null);
+      // where the sucked up fluid comes back out — connect it to a spout
+      this._outputSpoutBlock(obj));
+  }
+
+  /** Connection block: the spout(s) a drain or vacuum pushes its fluid out of. */
+  _outputSpoutBlock(obj) {
+    const slots = this._connSlots(obj, 'ConnectedSpout');
+    return el('div', { class: 'field' },
+      el('label', { text: t('conn.outTitle') }),
+      ...slots.map((i) => this._connPicker(obj, 'ConnectedSpout' + i, t('conn.output', { n: i }))),
+      el('button', {
+        class: 'btn small', text: '+ ' + t('conn.add'),
+        onclick: () => this.cb.onPickConnection?.(obj, 'ConnectedSpout' + slots.length),
+      }));
   }
 
   _balloonSection(obj) {
@@ -1014,6 +1031,21 @@ export class Inspector {
       || /spout|drain/i.test(obj.properties.Filename || '');
     if (!isSpout) return null;
 
+    // If a drain or vacuum feeds this spout (its ConnectedSpoutN points here), the
+    // spout only re-emits what that source swallows, so its own behavior/fluid/flow
+    // do nothing. Show the link instead of the misleading "Always running" controls.
+    const lvl = this.cb.getLevel();
+    const feeder = (lvl && obj.name) ? lvl.objects.find((o) => o !== obj &&
+      Object.entries(o.properties).some(([k, v]) => k.startsWith('ConnectedSpout') && v === obj.name)) : null;
+    if (feeder) {
+      return el('div', { class: 'spout-box' },
+        el('h4', { text: t('spout.title') }),
+        el('div', { class: 'conn-row' },
+          el('span', { class: 'group-chip sm', style: `background:${groupColor(feeder.name)}` }),
+          el('span', { class: 'conn-value', title: feeder.name, text: t('spout.fedBy', { name: feeder.name }) })),
+        el('p', { class: 'muted small', text: t('spout.fedHint') }));
+    }
+
     const set = (key, value) => {
       this.cb.push();
       if (value === '' || value == null) delete obj.properties[key];
@@ -1155,14 +1187,39 @@ export class Inspector {
     );
   }
 
+  /** Pick a sensible control for a raw property: yes/no for booleans, a dropdown
+   *  for known fluids and enums, a plain box otherwise. */
+  _smartInput(key, record, onEdit) {
+    const set = (v) => { this.cb.push(); record[key] = v; onEdit(); };
+    const cur = String(record[key] ?? '');
+    const dropdown = (opts, ci = false) => {
+      const c = ci ? cur.toLowerCase() : cur;
+      const s = el('select', {}, ...opts.map(([v, label]) =>
+        el('option', { value: v, text: label, selected: (ci ? v.toLowerCase() : v) === c ? '' : null })));
+      s.onchange = () => set(s.value);
+      return s;
+    };
+    if (PROP_BOOL.has(key)) {
+      const on = cur === '1' || cur.toLowerCase() === 'true';
+      const s = el('select', {},
+        el('option', { value: '1', text: t('opt.yes'), selected: on ? '' : null }),
+        el('option', { value: '0', text: t('opt.no'), selected: on ? null : '' }));
+      s.onchange = () => set(s.value);
+      return s;
+    }
+    if (key === 'FluidType' || /^FluidType\d+$/.test(key)) return dropdown(FLUIDS.map(([v, lk]) => [v, t(lk)]), true);
+    if (key === 'SpoutType') return dropdown([['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')], ['Drain', t('spout.b.drain')], ['DrainSpout', t('spout.b.drainspout')]]);
+    if (key === 'GnomeType') return dropdown(GNOME_TYPES.map(([v, lk]) => [v, t(lk)]), true);
+    if (key === 'TemperatureType') return dropdown(RAY_TYPES.map(([v, lk]) => [v, t(lk)]), true);
+    const inp = el('input', { value: record[key], onchange: (e) => set(e.target.value) });
+    return inp;
+  }
+
   _kvEditor(record, onEdit, obj = null) {
     const wrap = el('div', { class: 'kv' });
     const rerender = () => { this.render(); };
     for (const key of Object.keys(record)) {
-      const valInput = el('input', {
-        value: record[key],
-        onchange: (e) => { this.cb.push(); record[key] = e.target.value; onEdit(); },
-      });
+      const valInput = this._smartInput(key, record, onEdit);
       wrap.append(
         el('div', { class: 'kv-row' },
           el('span', { class: 'kv-key', title: key, text: key }),
