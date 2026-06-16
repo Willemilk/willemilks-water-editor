@@ -32,18 +32,26 @@ const RAY_TYPES = [
   ['turf', 'ray.t.turf'],
 ];
 
-// collectibles (ducks/stars): GnomeType decides which liquid picks them up
+// collectibles (ducks/stars): GnomeType is the Perry mod field; the real WMW
+// game uses StarType (baby/allie/mega ducks, music note, teleporter).
 const GNOME_TYPES = [
   ['water', 'gnome.water'],
   ['steam', 'gnome.steam'],
   ['sludge', 'gnome.sludge'],
+];
+const STAR_TYPES = [
+  ['baby', 'star.baby'],
+  ['allie', 'star.allie'],
+  ['mega', 'star.mega'],
+  ['note', 'star.note'],
+  ['teleport', 'star.teleport'],
 ];
 
 // properties that are really yes/no, so the raw editor shows a toggle not a box
 const PROP_BOOL = new Set([
   'Draggable', 'Interactive', 'MotorOn', 'MotorPingPong', 'MotorEase', 'VacuumOn',
   'HasString', 'FingerPoppable', 'PathIsClosed', 'PathIsGlobal', 'ShowTopEdge',
-  'HeavyIntro', 'IgnoreInEditorObjectSelect', 'IgnoreMixing', 'Goal',
+  'HeavyIntro', 'IgnoreInEditorObjectSelect', 'IgnoreMixing',
 ]);
 
 export function el(tag, attrs = {}, ...children) {
@@ -422,7 +430,7 @@ export class Inspector {
     if (/teleport|portal/.test(fn)) return 'teleport';
     if (/sprinkler/.test(fn) || p.SprinklerWidth !== undefined) return 'sprinkler';
     if (type === 'spout' || /spout|drain|faucet|shower|valve/.test(fn) || p.SpoutType !== undefined) return 'spout';
-    if (type === 'star' || p.GnomeType !== undefined || /star|duck|note|collect|gnome/.test(fn)) return 'collectible';
+    if (type === 'star' || type === 'collectible' || p.StarType !== undefined || p.GnomeType !== undefined || /star|duck|note|collect|gnome/.test(fn)) return 'collectible';
     // motors first: a pivoting mirror wall has motor props and should stay a motor
     if (p.PathPos0 !== undefined || p.MotorMoveSpeed !== undefined || p.MotorOn !== undefined || p.MotorTurnSpeed !== undefined) return 'motor';
     if (type === 'mirror' || /mirror/.test(fn)) return 'mirror';
@@ -695,6 +703,10 @@ export class Inspector {
     const countInp = el('input', { type: 'number', step: '5', min: '0', value: curCount });
     fluidSel.onchange = write;
     countInp.onchange = write;
+    // HasString / FingerPoppable are Perry mod fields; only show them when the
+    // balloon actually carries one, so WMW balloons do not get dead toggles
+    const hasPerryFlags = ['HasString', 'FingerPoppable'].some((k) =>
+      obj.properties[k] !== undefined || defaults[k] !== undefined);
     return this._section('balloon', 'sec.balloon',
       el('div', { class: 'row gap' },
         el('div', { class: 'field grow' }, el('label', { text: t('prop.initialFluid') }), fluidSel),
@@ -703,8 +715,8 @@ export class Inspector {
       this._connPicker(obj, 'ConnectedSpout', t('conn.balloon')),
       num('GravityScale', 'prop.buoyancy', '', '0.1'),
       num('VelDamping', 'prop.damping', '', '0.01'),
-      chk('HasString', 'prop.hasString'),
-      chk('FingerPoppable', 'prop.poppable'),
+      hasPerryFlags ? chk('HasString', 'prop.hasString') : null,
+      hasPerryFlags ? chk('FingerPoppable', 'prop.poppable') : null,
       dragChk());
   }
 
@@ -975,10 +987,16 @@ export class Inspector {
   _collectibleSection(obj) {
     const { num, sel } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
-    return this._section('collectible', 'sec.collectible',
-      sel('GnomeType', 'prop.gnomeType', GNOME_TYPES, defaults.GnomeType || 'water'),
+    const rows = [
+      sel('StarType', 'prop.starType', STAR_TYPES, defaults.StarType || 'baby'),
       num('CutRadius', 'prop.cutRadius', '6', '0.5'),
-      el('p', { class: 'muted small', text: t('coll.hint') }));
+    ];
+    // the Perry mod variant keys ducks by GnomeType instead; show it when present
+    if (obj.properties.GnomeType !== undefined || defaults.GnomeType !== undefined) {
+      rows.push(sel('GnomeType', 'prop.gnomeType', GNOME_TYPES, defaults.GnomeType || 'water'));
+    }
+    rows.push(el('p', { class: 'muted small', text: t('coll.hint') }));
+    return this._section('collectible', 'sec.collectible', ...rows);
   }
 
   /** Pipe: visual routing guide. Width plus a note about how flow really works. */
