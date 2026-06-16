@@ -841,6 +841,26 @@ export class Inspector {
     const speed = el('input', { type: 'number', step: '0.05', min: '0.05', value: p.HeavyIntroGameSpeed ?? '', placeholder: '1' });
     speed.onchange = () => { this.cb.push(); if (speed.value) p.HeavyIntroGameSpeed = speed.value; else delete p.HeavyIntroGameSpeed; commit(); };
 
+    // Level length: WMW locks width at 90 px, only the height varies (120
+    // standard, up to 500 for long scrollable levels). Resizing keeps the
+    // content centered so every object stays at the same spot.
+    const curH = level.terrain.height;
+    const heightInp = el('input', { type: 'number', min: '120', max: '500', step: '20', value: curH });
+    const applyHeight = () => {
+      const h = Math.max(120, Math.min(500, parseInt(heightInp.value, 10) || curH));
+      heightInp.value = String(h);
+      if (h === curH) return;
+      this.cb.push();
+      level.terrain.resizeHeight(h);
+      commit();
+      this.cb.onResize?.();
+      rerender();
+    };
+    heightInp.onchange = applyHeight;
+
+    // light validation: a level needs an exit drain (basic_drain) to be winnable
+    const hasExit = level.objects.some((o) => /basic_drain/i.test(o.properties.Filename || ''));
+
     // any custom properties already on the level that we do not have a row for
     const extras = Object.keys(p).filter((k) => !LSET_KNOWN.has(k));
     const newKey = el('input', { placeholder: t('insp.newProp'), list: 'lset-suggestions' });
@@ -853,6 +873,17 @@ export class Inspector {
     return el('div', { class: 'level-settings' },
       el('h3', { text: t('insp.levelSettings') }),
       el('p', { class: 'muted small', text: t('lset.hint') }),
+      !hasExit
+        ? el('div', { class: 'smart-box', style: 'border-left-color:#f59e0b' },
+            el('strong', { text: t('lset.noExitTitle') }),
+            el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('lset.noExitHint') }))
+        : null,
+      el('div', { class: 'smart-box', style: 'border-left-color:#34d399' },
+        el('div', { class: 'field' },
+          el('label', { text: t('lset.length') }),
+          el('div', { class: 'row gap', style: 'align-items:center' },
+            heightInp, el('span', { class: 'muted small', text: t('lset.lengthUnit') }))),
+        el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('lset.lengthHint') })),
       el('div', { class: 'smart-box', style: 'border-left-color:#2ea7ff' },
         el('div', { class: 'row gap', style: 'align-items:center' },
           el('label', { class: 'check-row' }, timerChk, el('span', { text: t('lset.timer') })),

@@ -116,6 +116,26 @@ re-applies them to the VFS db on every playtest and forces resetData. Custom lev
 exist in the VFS (saveIntoVFS) for the LevelInfo rows to resolve in game. Both features only
 take effect after a data reset (same water.db copy-on-first-run caveat as challenges).
 
+## Level building (v1.9.0)
+- LEVEL LENGTH: every real WMW level PNG is width 90 (locked), height varies (120 standard,
+  up to 500 for long scrollable levels) — verified across all 635 level PNGs. The level
+  settings panel has a "Level length (height)" control -> Terrain.resizeHeight(h) which grows
+  or shrinks vertically while keeping content CENTERED (the game centers terrain on the world
+  origin, coords.js), so objects keep their world position. Inspector cb.onResize refits the
+  canvas. Width must stay 90.
+- NEW LEVEL: createLevel() (src/main.js) seeds a starter kit so a from-scratch level is
+  instantly playable: a water spout (/Objects/pipe_spout_base.hs, SpoutType=OpenSpout,
+  FluidType=Water) up top and the level exit drain (/Objects/basic_drain.hs) by the room.
+- VALIDATION: the level settings panel warns when the level has no basic_drain exit (water
+  can't finish). basic_drain.hs is THE level exit drain and gets a green label in the spout
+  section; the misleading Draggable toggle was removed (0/636 levels set it).
+- WORLD MUSIC: the game maps music to worlds in native code (no data table), so the world
+  builder gives a world custom music by OVERWRITING the storyline's audio track in the VFS:
+  state.vfs._put('assets/Audio/Music/<track>.mp3', mp3bytes). Tracks per storyline: Swampy
+  JAW_LevelPack_Music_1..6, Cranky Cranky_Music_1..4, Allie Allie_LevelPack_1..2, Mystery
+  MD_MysteryDuck. mp3 bytes are NOT persisted in localStorage (too big), only the track name;
+  re-upload after loading fresh game files. World IMAGE (iconData base64) already shipped.
+
 ## Known gotchas
 - window.prompt() does not work in Electron → use modalPrompt() in src/main.js.
 - After Terrain.fromPNGBytes, capture bmp.width/height BEFORE bmp.close() (Chrome returns 0 after).

@@ -298,6 +298,9 @@ function renderEditor() {
     // level XML leaves out — expose those so the quick editors show the truth
     getDefaults: (obj) => { try { return state.resolver.getHS(obj.filename).defaults || {}; } catch { return {}; } },
     onEdit: () => { state.editor.requestRender(); updateUndoButtons(); markDirty(); },
+    // the level settings panel can resize the terrain (level length); refit so
+    // the taller or shorter level is fully visible again
+    onResize: () => { state.editor.fitView(); state.editor.requestRender(); },
     onPickConnection: (obj, propName) => {
       // next click on an object in the canvas wires it into this property
       state.editor.pickObjectMode = (hit) => {
@@ -600,6 +603,13 @@ function createLevel(clean) {
   const level = new Level(clean);
   level.terrain = Terrain.blank(DEFAULT_LEVEL_WIDTH, DEFAULT_LEVEL_HEIGHT);
   level.room = { x: 0, y: -30 };
+  // starter kit so a level built from scratch is instantly playable: a water
+  // source up top and the level exit drain down near Swampy's room. Both are
+  // real stock objects, so the rebuilt apk resolves them in game.
+  const spout = level.addObject('/Objects/pipe_spout_base.hs', 0, 32, 'spout');
+  spout.properties.SpoutType = 'OpenSpout';
+  spout.properties.FluidType = 'Water';
+  level.addObject('/Objects/basic_drain.hs', 0, -28);
   state.level = level;
   document.getElementById('canvas-empty').style.display = 'none';
   document.getElementById('level-title').textContent = '· ' + clean + ' (new)';
@@ -900,6 +910,18 @@ const WORLD_ICONS = ['world_select_00', 'world_select_01', 'world_select_02', 'w
 const WORLD_TILES = ['tile_yellow', 'tile_purple', 'tile_green', 'tile_magenta'];
 // storyline value -> which character's world select the pack shows up in
 const WORLD_CHARS = [[0, 'world.char.swampy'], [1, 'world.char.cranky'], [3, 'world.char.mystery'], [6, 'world.char.allie']];
+// Custom world music. The game maps music to worlds in native code, so the only
+// reliable way to give a world your own song is to overwrite the audio track its
+// storyline plays. These are the real level pack tracks per character; the
+// default is the track a fresh custom world of that storyline uses.
+const MUSIC_TRACKS = [
+  'JAW_LevelPack_Music_1', 'JAW_LevelPack_Music_2', 'JAW_LevelPack_Music_3',
+  'JAW_LevelPack_Music_4', 'JAW_LevelPack_Music_5', 'JAW_LevelPack_Music_6',
+  'Cranky_Music_1', 'Cranky_Music_2', 'Cranky_Music_3', 'Cranky_Music_4',
+  'Allie_LevelPack_1', 'Allie_LevelPack_2',
+  'MD_MysteryDuck', 'MysteryDuck_LRS', 'Frankenweenie_LevelPack_1d', 'WMW_Birthday_Level',
+];
+const STORYLINE_MUSIC = { 0: 'JAW_LevelPack_Music_1', 1: 'Cranky_Music_1', 3: 'MD_MysteryDuck', 6: 'Allie_LevelPack_1' };
 
 /** "/Levels/foo" for a level browser entry, used as the LevelInfo Filename. */
 function levelFilename(entry) {
@@ -995,6 +1017,10 @@ function showWorldBuilder() {
     const iconSel = el('select', {}, ...WORLD_ICONS.map((ic) => el('option', { value: ic, text: ic, selected: cur && cur.packIcon === ic ? '' : null })));
     const tileSel = el('select', {}, ...WORLD_TILES.map((tt) => el('option', { value: tt, text: tt, selected: cur && cur.tileTexture === tt ? '' : null })));
     const iconFile = el('input', { type: 'file', accept: 'image/png,image/webp,image/jpeg' });
+    const musicFile = el('input', { type: 'file', accept: 'audio/mpeg,.mp3' });
+    const defTrack = (cur && cur.musicTrack) || STORYLINE_MUSIC[cur ? (cur.storyline ?? 0) : 0] || MUSIC_TRACKS[0];
+    const musicSel = el('select', {}, ...MUSIC_TRACKS.map((tr) =>
+      el('option', { value: tr, text: tr, selected: tr === defTrack ? '' : null })));
 
     const picked = new Set(cur ? cur.levels.map((l) => l.filename) : []);
     const countLbl = el('span', { class: 'muted small' });
@@ -1039,6 +1065,21 @@ function showWorldBuilder() {
         def.iconData = btoa(bin);
         def.packIcon = packName.toLowerCase();
       }
+      // Custom music: overwrite the storyline's audio track in the VFS so the
+      // rebuilt apk ships the song. mp3s are too big for localStorage, so only
+      // the chosen track name is remembered; the bytes live in the VFS for this
+      // session (re-upload after loading fresh game files).
+      const mfile = musicFile.files?.[0];
+      if (mfile) {
+        const mbuf = new Uint8Array(await mfile.arrayBuffer());
+        state.vfs._put('assets/Audio/Music/' + musicSel.value + '.mp3', mbuf);
+        def.musicTrack = musicSel.value;
+        def.musicName = mfile.name;
+        markDirty();
+      } else if (existing?.musicTrack) {
+        def.musicTrack = existing.musicTrack;
+        def.musicName = existing.musicName;
+      }
       if (editing != null) list[editing] = def; else list.push(def);
       setPref('customWorlds', list);
       try { await applyAllWorlds(); markDirty(); toast(t('world.saved'), 'ok', 4000); }
@@ -1081,6 +1122,13 @@ function showWorldBuilder() {
         el('div', { class: 'field grow' }, el('label', { text: t('world.icon') }), iconSel),
         el('div', { class: 'field grow' }, el('label', { text: t('world.tile') }), tileSel)),
       el('div', { class: 'field' }, el('label', { text: t('world.customIcon') }), iconFile),
+      el('div', { class: 'field' },
+        el('label', { text: t('world.music') }),
+        el('div', { class: 'row gap' },
+          el('div', { class: 'field grow' }, musicSel),
+          el('div', { class: 'field grow' }, musicFile)),
+        el('p', { class: 'muted small', style: 'margin:2px 0 0',
+          text: cur && cur.musicName ? t('world.musicCur', { name: cur.musicName }) : t('world.musicHint') })),
       el('div', { class: 'field' },
         el('div', { class: 'row gap', style: 'align-items:center' }, el('label', { text: t('world.levels') }), countLbl),
         filter, levelList),

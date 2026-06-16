@@ -214,6 +214,27 @@ export class Terrain {
     this.rect(0, 0, this.width - 1, this.height - 1, rgb, true);
   }
 
+  /** Grow or shrink the level vertically, keeping the existing content centered
+   *  so every object and painted pixel stays at the same world position (the
+   *  game centers the terrain on the world origin). Width stays locked: every
+   *  real WMW level is 90 px wide, only the height varies (120 standard, up to
+   *  500 for long scrollable levels). New space is filled with empty (air). */
+  resizeHeight(newHeight) {
+    newHeight = Math.max(60, Math.round(newHeight));
+    if (newHeight === this.height) return;
+    const w = this.width;
+    const next = Terrain.blankData(w, newHeight);
+    const offset = Math.round((newHeight - this.height) / 2); // keep content centered
+    const rowLen = w * 4;
+    for (let y = 0; y < this.height; y++) {
+      const ny = y + offset;
+      if (ny < 0 || ny >= newHeight) continue;
+      next.set(this.data.subarray(y * rowLen, y * rowLen + rowLen), ny * rowLen);
+    }
+    this.data = next;
+    this.height = newHeight;
+  }
+
   /** Count pixels per exact color, for the level stats panel. */
   histogram() {
     const counts = new Map();
