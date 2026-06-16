@@ -47,6 +47,20 @@ const STAR_TYPES = [
   ['teleport', 'star.teleport'],
 ];
 
+// real per level settings (verified across all 636 WMW levels). Music and
+// cutscenes are per world in this game, not per level, so they are not here.
+const LSET_BOOL = [
+  ['HeavyIntro', 'lset.heavyIntro'],
+  ['ReversePan', 'lset.reversePan'],
+  ['SkipPan', 'lset.skipPan'],
+  ['ShowTopEdge', 'lset.topEdge'],
+  ['ShowBottomEdge', 'lset.bottomEdge'],
+  ['WaterTurnsIntoMud', 'lset.waterToMud'],
+  ['MysteryLevel', 'lset.mystery'],
+  ['BonusLevel', 'lset.bonus'],
+];
+const LSET_KNOWN = new Set(['BonusTimer', 'HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])]);
+
 // properties that are really yes/no, so the raw editor shows a toggle not a box
 const PROP_BOOL = new Set([
   'Draggable', 'Interactive', 'MotorOn', 'MotorPingPong', 'MotorEase', 'VacuumOn',
@@ -453,8 +467,7 @@ export class Inspector {
     if (!this.object) {
       this.container.replaceChildren(
         el('div', { class: 'inspector-empty' },
-          el('h3', { text: t('insp.levelSettings') }),
-          this._kvEditor(level.properties, () => this.cb.onEdit()),
+          this._levelSettingsSection(level),
           el('div', { class: 'sep' }),
           this._challengeSection(level),
           this._groupsOverview(level),
@@ -802,6 +815,73 @@ export class Inspector {
         class: 'btn small', text: t('group.controlWith'),
         onclick: () => this.cb.onPickController?.(obj),
       }));
+  }
+
+  /** Real, curated level settings instead of the raw object property list. */
+  _levelSettingsSection(level) {
+    const p = level.properties;
+    const rerender = () => this.render();
+    const commit = () => { this.cb.onEdit(); };
+
+    const boolRow = (key, labelKey) => {
+      const c = el('input', { type: 'checkbox' });
+      c.checked = p[key] === '1' || p[key] === 'true';
+      c.onchange = () => { this.cb.push(); if (c.checked) p[key] = '1'; else delete p[key]; commit(); };
+      return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
+    };
+
+    // time limit = BonusTimer (+ BonusLevel, which the timer needs)
+    const hasTimer = p.BonusTimer != null && p.BonusTimer !== '';
+    const timerChk = el('input', { type: 'checkbox' });
+    timerChk.checked = hasTimer;
+    const secInp = el('input', { type: 'number', min: '1', step: '5', value: hasTimer ? p.BonusTimer : '60' });
+    const applyTimer = () => {
+      this.cb.push();
+      if (timerChk.checked) { p.BonusTimer = String(parseInt(secInp.value, 10) || 60); p.BonusLevel = '1'; }
+      else { delete p.BonusTimer; }
+      commit(); rerender();
+    };
+    timerChk.onchange = applyTimer;
+    secInp.onchange = applyTimer;
+
+    const speed = el('input', { type: 'number', step: '0.05', min: '0.05', value: p.HeavyIntroGameSpeed ?? '', placeholder: '1' });
+    speed.onchange = () => { this.cb.push(); if (speed.value) p.HeavyIntroGameSpeed = speed.value; else delete p.HeavyIntroGameSpeed; commit(); };
+
+    // any custom properties already on the level that we do not have a row for
+    const extras = Object.keys(p).filter((k) => !LSET_KNOWN.has(k));
+    const newKey = el('input', { placeholder: t('insp.newProp'), list: 'lset-suggestions' });
+    const newVal = el('input', { placeholder: t('lset.value'), class: 'lset-val' });
+    const addBtn = el('button', {
+      class: 'btn small', text: t('btn.add'),
+      onclick: () => { const k = newKey.value.trim(); if (!k || p[k] !== undefined) return; this.cb.push(); p[k] = newVal.value; commit(); rerender(); },
+    });
+
+    return el('div', { class: 'level-settings' },
+      el('h3', { text: t('insp.levelSettings') }),
+      el('p', { class: 'muted small', text: t('lset.hint') }),
+      el('div', { class: 'smart-box', style: 'border-left-color:#2ea7ff' },
+        el('div', { class: 'row gap', style: 'align-items:center' },
+          el('label', { class: 'check-row' }, timerChk, el('span', { text: t('lset.timer') })),
+          hasTimer ? secInp : null),
+        boolRow('HeavyIntro', 'lset.heavyIntro'),
+        el('div', { class: 'field' }, el('label', { text: t('lset.introSpeed') }), speed),
+        boolRow('ReversePan', 'lset.reversePan'),
+        boolRow('SkipPan', 'lset.skipPan'),
+        boolRow('ShowTopEdge', 'lset.topEdge'),
+        boolRow('ShowBottomEdge', 'lset.bottomEdge'),
+        boolRow('WaterTurnsIntoMud', 'lset.waterToMud'),
+        boolRow('MysteryLevel', 'lset.mystery'),
+        boolRow('BonusLevel', 'lset.bonus')),
+      extras.length
+        ? el('div', { class: 'kv' }, ...extras.map((k) => el('div', { class: 'kv-row' },
+            el('span', { class: 'kv-key', title: k, text: k }),
+            this._smartInput(k, p, commit),
+            el('button', { class: 'icon-btn', html: '&times;', title: t('conn.clear'),
+              onclick: () => { this.cb.push(); delete p[k]; commit(); rerender(); } }))))
+        : null,
+      el('div', { class: 'kv-row add' }, newKey, newVal, addBtn),
+      el('datalist', { id: 'lset-suggestions' },
+        ...['BonusTimer', 'HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])].map((k) => el('option', { value: k }))));
   }
 
   /** Custom challenge builder for the level. Conditions map 1:1 to the real
