@@ -671,6 +671,16 @@ export class Editor {
           connSources.add(obj);
           connTargets.add(target);
         }
+        // Parent = this object is glued onto another and moves with it (pink link)
+        const par = obj.properties.Parent;
+        if (par) {
+          const target = byName.get(par);
+          if (target && target !== obj) {
+            connections.push({ from: obj, to: target, kind: 'parent', color: '#f472b6' });
+            connSources.add(obj);
+            connTargets.add(target);
+          }
+        }
       }
     }
 

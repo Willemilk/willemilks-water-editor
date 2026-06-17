@@ -280,6 +280,8 @@ function renderEditor() {
   state.editor.smartTerrain = getPref('smartTerrain', true);
 
   const levelBrowser = new LevelBrowser(document.getElementById('level-panel'), openLevel);
+  levelBrowser.onNewLevel = () => { if (state.vfs) newLevel(); else toast(t('toast.loadFirst'), 'err'); };
+  levelBrowser.onEditWorld = (world) => showWorldBuilder(world);
   levelBrowser.setLevels(state.levels);
   levelBrowser.setCustomWorlds(getPref('customWorlds', []));
   state.levelBrowser = levelBrowser;
@@ -301,6 +303,17 @@ function renderEditor() {
     // the level settings panel can resize the terrain (level length); refit so
     // the taller or shorter level is fully visible again
     onResize: () => { state.editor.fitView(); state.editor.requestRender(); },
+    // music: WMW maps music to worlds in native code, so "per level" music works
+    // by overwriting the chosen game track in the VFS (ships on the next rebuild)
+    musicTracks: MUSIC_TRACKS,
+    onReplaceMusic: async (track, file) => {
+      try {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        state.vfs._put('assets/Audio/Music/' + track + '.mp3', buf);
+        markDirty();
+        toast(t('lset.musicDone', { track }), 'ok', 4000);
+      } catch (e) { console.error(e); toast(t('ch.dbFail'), 'err', 6000); }
+    },
     onPickConnection: (obj, propName) => {
       // next click on an object in the canvas wires it into this property
       state.editor.pickObjectMode = (hit) => {
@@ -988,10 +1001,16 @@ async function resetDatabase(what) {
   } catch (e) { console.error(e); toast(t('reset.fail'), 'err', 7000); }
 }
 
-function showWorldBuilder() {
+function showWorldBuilder(editWorld = null) {
   if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
   document.querySelector('.modal-overlay')?.remove();
+  // when opened via a world's edit button, jump straight into editing that world
   let editing = null;
+  if (editWorld) {
+    const list = getPref('customWorlds', []);
+    const i = list.findIndex((w) => w.packName === editWorld.packName);
+    if (i >= 0) editing = i;
+  }
 
   const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
   const card = el('div', { class: 'welcome-card modal-card settings-card' });

@@ -57,9 +57,10 @@ const LSET_BOOL = [
   ['ShowBottomEdge', 'lset.bottomEdge'],
   ['WaterTurnsIntoMud', 'lset.waterToMud'],
   ['MysteryLevel', 'lset.mystery'],
-  ['BonusLevel', 'lset.bonus'],
 ];
-const LSET_KNOWN = new Set(['BonusTimer', 'HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])]);
+// BonusTimer / BonusLevel are deliberately NOT known, so any left on a level
+// surface in the raw extras list where they can be deleted (the timer crashed).
+const LSET_KNOWN = new Set(['HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])]);
 
 // properties that are really yes/no, so the raw editor shows a toggle not a box
 const PROP_BOOL = new Set([
@@ -106,6 +107,8 @@ export class LevelBrowser {
   constructor(container, onOpen) {
     this.container = container;
     this.onOpen = onOpen;
+    this.onNewLevel = null;   // set by main.js: build a level from scratch
+    this.onEditWorld = null;  // set by main.js: open the world builder for a world
     this.levels = [];
     this.customWorlds = [];
     this.activeName = null;
@@ -146,7 +149,7 @@ export class LevelBrowser {
         if (entry) entries.push({ entry, title: entry.name });
       }
       if (!entries.length) continue;
-      const pack = { title: w.displayName, character, entries, custom: true };
+      const pack = { title: w.displayName, character, entries, custom: true, world: w };
       let idx = -1;
       for (let i = 0; i < this.packs.length; i++) if (this.packs[i].character === character) idx = i;
       if (idx >= 0) this.packs.splice(idx + 1, 0, pack); else this.packs.push(pack);
@@ -199,6 +202,11 @@ export class LevelBrowser {
       const scroller = this.container.querySelector('.scroll');
       if (scroller && prevScroll) scroller.scrollTop = prevScroll;
     };
+    // prominent "build a level from scratch" action right above the level list
+    const newBtn = this.onNewLevel
+      ? el('button', { class: 'btn primary new-level-btn', text: '+ ' + t('btn.newLevel'),
+          onclick: () => this.onNewLevel() })
+      : null;
 
     if (q) {
       // flat results across worlds, matching display title and filename;
@@ -211,7 +219,7 @@ export class LevelBrowser {
           }
         }
       }
-      this.container.replaceChildren(search,
+      this.container.replaceChildren(search, newBtn,
         el('div', { class: 'list scroll' }, ...hits.map(({ item, pack }) => this._row(item, null, pack.title))));
       restoreFocus();
       restoreScroll();
@@ -233,13 +241,17 @@ export class LevelBrowser {
       },
         el('summary', {}, el('span', { text: pack.title }),
           pack.custom ? el('span', { class: 'tag', text: t('world.tag') }) : null,
+          pack.custom && this.onEditWorld
+            ? el('button', { class: 'icon-btn world-edit', title: t('world.edit'), html: '&#9881;',
+                onclick: (e) => { e.preventDefault(); e.stopPropagation(); this.onEditWorld(pack.world); } })
+            : null,
           el('span', { class: 'count', text: pack.entries.length })),
         el('div', { class: 'list' }, ...pack.entries.map((item, n) => this._row(item, n + 1)))
       );
       sections.push(details);
     });
 
-    this.container.replaceChildren(search, el('div', { class: 'scroll obj-groups' }, ...sections));
+    this.container.replaceChildren(search, newBtn, el('div', { class: 'scroll obj-groups' }, ...sections));
     restoreFocus();
     restoreScroll();
   }
@@ -400,6 +412,7 @@ const KIND_COLORS = {
   generator: '#a3e635',
   pipe: '#a8a29e',
   mirror: '#67e8f9',
+  attach: '#f472b6',
   generic: '#5c6f85',
 };
 
@@ -513,6 +526,7 @@ export class Inspector {
         el('div', { class: 'sep' }),
         smart,
         extraMotor,
+        this._attachmentBlock(obj),
         el('details', {
           class: 'adv-props',
           open: advOpen ? '' : null,
@@ -813,30 +827,9 @@ export class Inspector {
       return el('label', { class: 'check-row' }, c, el('span', { text: t(labelKey) }));
     };
 
-    // Time limit. In every one of the 636 real levels BonusTimer travels
-    // together with BonusLevel=1, and no level ever has one without the other.
-    // So the timer owns both: turning it off clears BOTH. Leaving BonusLevel=1
-    // behind made a "bonus level with no timer", a state the game never ships
-    // and that can crash on load.
-    const hasTimer = p.BonusTimer != null && p.BonusTimer !== '';
-    const timerChk = el('input', { type: 'checkbox' });
-    timerChk.checked = hasTimer;
-    const secInp = el('input', { type: 'number', min: '1', step: '5', value: hasTimer ? p.BonusTimer : '60' });
-    const applyTimer = () => {
-      this.cb.push();
-      if (timerChk.checked) {
-        const secs = Math.max(1, parseInt(secInp.value, 10) || 60);
-        secInp.value = String(secs);
-        p.BonusTimer = String(secs);
-        p.BonusLevel = '1';
-      } else {
-        delete p.BonusTimer;
-        delete p.BonusLevel;
-      }
-      commit(); rerender();
-    };
-    timerChk.onchange = applyTimer;
-    secInp.onchange = applyTimer;
+    // The BonusTimer / BonusLevel "time limit" was removed: it reliably crashes
+    // the game on a normal level. Any BonusTimer/BonusLevel still on a level now
+    // shows in the raw extras list below so it can be deleted.
 
     const speed = el('input', { type: 'number', step: '0.05', min: '0.05', value: p.HeavyIntroGameSpeed ?? '', placeholder: '1' });
     speed.onchange = () => { this.cb.push(); if (speed.value) p.HeavyIntroGameSpeed = speed.value; else delete p.HeavyIntroGameSpeed; commit(); };
@@ -861,6 +854,17 @@ export class Inspector {
     // light validation: a level needs an exit drain (basic_drain) to be winnable
     const hasExit = level.objects.some((o) => /basic_drain/i.test(o.properties.Filename || ''));
 
+    // music: shown per level, but WMW maps music to worlds in native code, so it
+    // works by overwriting the chosen game track in the build (honest note below)
+    const tracks = this.cb.musicTracks || [];
+    const musicSel = tracks.length
+      ? el('select', {}, ...tracks.map((tr) => el('option', { value: tr, text: tr }))) : null;
+    const musicFile = tracks.length ? el('input', { type: 'file', accept: 'audio/mpeg,.mp3' }) : null;
+    if (musicFile) musicFile.onchange = () => {
+      const f = musicFile.files?.[0];
+      if (f) this.cb.onReplaceMusic?.(musicSel.value, f);
+    };
+
     // any custom properties already on the level that we do not have a row for
     const extras = Object.keys(p).filter((k) => !LSET_KNOWN.has(k));
     const newKey = el('input', { placeholder: t('insp.newProp'), list: 'lset-suggestions' });
@@ -884,11 +888,16 @@ export class Inspector {
           el('div', { class: 'row gap', style: 'align-items:center' },
             heightInp, el('span', { class: 'muted small', text: t('lset.lengthUnit') }))),
         el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('lset.lengthHint') })),
+      tracks.length
+        ? el('div', { class: 'smart-box', style: 'border-left-color:#c084fc' },
+            el('div', { class: 'field' },
+              el('label', { text: t('lset.music') }),
+              el('div', { class: 'row gap' },
+                el('div', { class: 'field grow' }, musicSel),
+                el('div', { class: 'field grow' }, musicFile))),
+            el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('lset.musicHint') }))
+        : null,
       el('div', { class: 'smart-box', style: 'border-left-color:#2ea7ff' },
-        el('div', { class: 'row gap', style: 'align-items:center' },
-          el('label', { class: 'check-row' }, timerChk, el('span', { text: t('lset.timer') })),
-          hasTimer ? secInp : null),
-        hasTimer ? el('p', { class: 'muted small', text: t('lset.timerHint') }) : null,
         boolRow('HeavyIntro', 'lset.heavyIntro'),
         el('div', { class: 'field' }, el('label', { text: t('lset.introSpeed') }), speed),
         boolRow('ReversePan', 'lset.reversePan'),
@@ -906,7 +915,7 @@ export class Inspector {
         : null,
       el('div', { class: 'kv-row add' }, newKey, newVal, addBtn),
       el('datalist', { id: 'lset-suggestions' },
-        ...['BonusTimer', 'HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])].map((k) => el('option', { value: k }))));
+        ...['HeavyIntroGameSpeed', ...LSET_BOOL.map((r) => r[0])].map((k) => el('option', { value: k }))));
   }
 
   /** Custom challenge builder for the level. Conditions map 1:1 to the real
@@ -1130,6 +1139,26 @@ export class Inspector {
   }
 
   /** One connection slot: current target, pick in level, disconnect. */
+  /** Universal "glue this object onto a moving part" block. Writes Parent=<name>,
+   *  the real game property (1548 uses across the levels) that welds an object to
+   *  a pivot, motor, fan arm, switch or any moving block so they move together
+   *  (e.g. a spout riding a SprayPivot). The parent can be any object in the
+   *  level; the canvas draws a pink "glued to" link. */
+  _attachmentBlock(obj) {
+    const parent = obj.properties.Parent;
+    const lvl = this.cb.getLevel?.();
+    // who is glued ONTO this object (reverse), so a moving block shows its riders
+    const riders = (lvl && obj.name)
+      ? lvl.objects.filter((o) => o !== obj && o.properties.Parent === obj.name).map((o) => o.name)
+      : [];
+    return this._section('attach', 'sec.attach',
+      this._connPicker(obj, 'Parent', t('attach.parent')),
+      el('p', { class: 'muted small', text: parent ? t('attach.onHint', { name: parent }) : t('attach.hint') }),
+      riders.length
+        ? el('p', { class: 'muted small', text: t('attach.riders', { list: riders.join(', ') }) })
+        : null);
+  }
+
   _connPicker(obj, propName, label) {
     const val = obj.properties[propName] || '';
     return el('div', { class: 'conn-row' },

@@ -116,6 +116,27 @@ re-applies them to the VFS db on every playtest and forces resetData. Custom lev
 exist in the VFS (saveIntoVFS) for the LevelInfo rows to resolve in game. Both features only
 take effect after a data reset (same water.db copy-on-first-run caveat as challenges).
 
+## Object attachment + browser UX (v1.10.0)
+- ATTACH / GLUE: objects ride a moving block via the real `Parent` property (1548 uses across
+  the levels, e.g. a touch_spout with Parent="SprayPivot" rides a wall pivot). Inspector shows
+  a universal `_attachmentBlock` for every object: a Parent connection picker ("Moves with")
+  plus a reverse "riding on this" list. editor.js draws a pink dashed Parent link on the canvas
+  (kind 'parent', color #f472b6). Works for fans/vacuums/switches/spouts/drains/etc.
+- TIMER REMOVED: the BonusTimer/BonusLevel "time limit" was deleted from the level settings
+  panel because it reliably crashes a normal level. BonusTimer/BonusLevel are no longer in
+  LSET_KNOWN, so any left on a level surface in the raw extras list to be deleted.
+- LEVEL BROWSER: a prominent "+ New level" button (LevelBrowser.onNewLevel) sits above the
+  level list; each custom world row has a gear edit button (LevelBrowser.onEditWorld ->
+  showWorldBuilder(world)) opening the builder at that world (music + settings).
+- MUSIC IN LEVEL SETTINGS: the level settings panel has a music track dropdown + mp3 upload
+  (cb.musicTracks / cb.onReplaceMusic -> vfs._put). It is per world under the hood (honest
+  note), same track-overwrite mechanism as the world builder.
+- THE "*S*" MARK: in-game world/level titles always go through the engine's native loc table
+  (DisplayPackName is itself treated as a loc reference; real packs store another PackName in
+  it). A made-up custom name is not in that table, so the game appends its missing-string mark
+  "*S*". This is baked into the app's native code and CANNOT be removed from the editor/data
+  side for arbitrary text; only reusing a real loc key would avoid it (losing the custom name).
+
 ## Level building (v1.9.0)
 - LEVEL LENGTH: every real WMW level PNG is width 90 (locked), height varies (120 standard,
   up to 500 for long scrollable levels) — verified across all 635 level PNGs. The level
