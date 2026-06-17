@@ -5,9 +5,12 @@
 export const MATERIALS = [
   { id: 'empty',     name: 'Empty (air)',     rgb: [255, 255, 255], dig: false, desc: 'Open space. Fluids flow freely here.' },
   { id: 'dirt',      name: 'Dirt',            rgb: [113, 91, 49],   dig: true,  desc: 'Diggable ground. The player swipes through this.' },
-  { id: 'rock',      name: 'Rock',            rgb: [71, 71, 71],    dig: false, desc: 'Solid, can never be dug.' },
-  { id: 'rock_sh',   name: 'Rock shadow',     rgb: [40, 40, 40],    dig: false, desc: 'Visual shading variant of rock (solid).' },
-  { id: 'rock_hi',   name: 'Rock highlight',  rgb: [166, 166, 166], dig: false, desc: 'Visual highlight variant of rock (solid).' },
+  { id: 'rock',      name: 'Rock',            rgb: [71, 71, 71],    dig: false, desc: 'Solid, can never be dug. The light/dark edges are added automatically.' },
+  // Rock shadow/highlight are the rim shades the smart rock pass derives on its
+  // own, so they are not painted by hand (paint:false hides them from the palette
+  // but they are still recognized in existing levels and used by the rock pass).
+  { id: 'rock_sh',   name: 'Rock shadow',     rgb: [40, 40, 40],    dig: false, paint: false, desc: 'Auto edge shade of rock (solid).' },
+  { id: 'rock_hi',   name: 'Rock highlight',  rgb: [166, 166, 166], dig: false, paint: false, desc: 'Auto edge highlight of rock (solid).' },
   { id: 'water',     name: 'Water',           rgb: [43, 33, 254],   dig: false, desc: 'Pre-placed water at level start.' },
   { id: 'poison',    name: 'Poison',          rgb: [139, 25, 135],  dig: false, desc: 'Pre-placed contaminated water.' },
   { id: 'ooze',      name: 'Ooze',            rgb: [190, 101, 47],  dig: false, desc: 'Pre-placed ooze (lava).' },

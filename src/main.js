@@ -300,18 +300,19 @@ function renderEditor() {
     // level XML leaves out — expose those so the quick editors show the truth
     getDefaults: (obj) => { try { return state.resolver.getHS(obj.filename).defaults || {}; } catch { return {}; } },
     onEdit: () => { state.editor.requestRender(); updateUndoButtons(); markDirty(); },
-    // the level settings panel can resize the terrain (level length); refit so
-    // the taller or shorter level is fully visible again
-    onResize: () => { state.editor.fitView(); state.editor.requestRender(); },
+    // the level settings panel can resize the terrain (level length). Re-sync the
+    // offscreen terrain canvas to the NEW size (else it draws stretched) and refit.
+    onResize: () => { state.editor.refreshTerrain(); state.editor.fitView(); },
     // music: WMW maps music to worlds in native code, so "per level" music works
-    // by overwriting the chosen game track in the VFS (ships on the next rebuild)
-    musicTracks: MUSIC_TRACKS,
-    onReplaceMusic: async (track, file) => {
+    // by overwriting every track in a character's group in the VFS (ships STORED
+    // on the next rebuild). Pass the group's track list.
+    musicGroups: MUSIC_GROUPS,
+    onReplaceMusic: async (tracks, file) => {
       try {
         const buf = new Uint8Array(await file.arrayBuffer());
-        state.vfs._put('assets/Audio/Music/' + track + '.mp3', buf);
+        for (const tr of tracks) state.vfs._put('assets/Audio/Music/' + tr + '.mp3', buf);
         markDirty();
-        toast(t('lset.musicDone', { track }), 'ok', 4000);
+        toast(t('lset.musicDone'), 'ok', 4000);
       } catch (e) { console.error(e); toast(t('ch.dbFail'), 'err', 6000); }
     },
     onPickConnection: (obj, propName) => {
@@ -601,15 +602,52 @@ async function openLevel(entry) {
 }
 
 function newLevel() {
-  modalPrompt(t('new.title'), t('new.name'), 'my_custom_level', (name) => {
-    if (!name) return;
-    const clean = name.trim().replace(/\s+/g, '_');
-    if (state.levels.some((l) => l.name.toLowerCase() === clean.toLowerCase())) {
-      toast(t('new.exists'), 'err');
-      return;
-    }
+  if (!state.vfs) return toast(t('toast.loadFirst'), 'err');
+  document.querySelector('.modal-overlay')?.remove();
+  const worlds = getPref('customWorlds', []);
+  const nameInp = el('input', { type: 'text', placeholder: t('new.name'), value: 'my_custom_level' });
+  // choose which custom world (and implicitly which slot) the level joins; a full
+  // world (20 levels) is disabled, since the game caps a pack at 20
+  const worldSel = el('select', {},
+    el('option', { value: '', text: t('new.noWorld') }),
+    ...worlds.map((w, i) => {
+      const n = (w.levels || []).length;
+      return el('option', { value: String(i), text: `${w.displayName} (${n}/20)`, disabled: n >= 20 ? '' : null });
+    }));
+  const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
+  const create = async () => {
+    const clean = nameInp.value.trim().replace(/\s+/g, '_');
+    if (!clean) return;
+    if (state.levels.some((l) => l.name.toLowerCase() === clean.toLowerCase())) { toast(t('new.exists'), 'err'); return; }
+    overlay.remove();
     createLevel(clean);
-  });
+    saveCurrent(); // write into the VFS so a world can reference its file
+    const sel = worldSel.value;
+    if (sel !== '') {
+      const list = getPref('customWorlds', []);
+      const w = list[+sel];
+      if (w) {
+        w.levels = w.levels || [];
+        if (w.levels.length >= 20) { toast(t('world.max'), 'warn'); return; }
+        w.levels.push({ name: clean, filename: '/Levels/' + clean });
+        setPref('customWorlds', list);
+        try { await applyAllWorlds(); markDirty(); } catch (e) { console.error(e); }
+        state.levelBrowser?.setCustomWorlds(getPref('customWorlds', []));
+        toast(t('new.addedToWorld', { world: w.displayName }), 'ok', 4000);
+      }
+    }
+  };
+  overlay.append(el('div', { class: 'welcome-card modal-card' },
+    el('h3', { text: t('new.title') }),
+    el('div', { class: 'field' }, el('label', { text: t('new.name') }), nameInp),
+    el('div', { class: 'field' }, el('label', { text: t('new.world') }), worldSel),
+    el('p', { class: 'muted small', text: t('new.worldHint') }),
+    el('div', { class: 'row gap', style: 'justify-content:flex-end;margin-top:12px' },
+      el('button', { class: 'btn', text: t('btn.cancel'), onclick: () => overlay.remove() }),
+      el('button', { class: 'btn primary', text: t('new.create'), onclick: create }))));
+  document.body.append(overlay);
+  nameInp.focus(); nameInp.select();
+  nameInp.onkeydown = (e) => { if (e.key === 'Enter') create(); };
 }
 
 function createLevel(clean) {
@@ -924,17 +962,17 @@ const WORLD_TILES = ['tile_yellow', 'tile_purple', 'tile_green', 'tile_magenta']
 // storyline value -> which character's world select the pack shows up in
 const WORLD_CHARS = [[0, 'world.char.swampy'], [1, 'world.char.cranky'], [3, 'world.char.mystery'], [6, 'world.char.allie']];
 // Custom world music. The game maps music to worlds in native code, so the only
-// reliable way to give a world your own song is to overwrite the audio track its
-// storyline plays. These are the real level pack tracks per character; the
-// default is the track a fresh custom world of that storyline uses.
-const MUSIC_TRACKS = [
-  'JAW_LevelPack_Music_1', 'JAW_LevelPack_Music_2', 'JAW_LevelPack_Music_3',
-  'JAW_LevelPack_Music_4', 'JAW_LevelPack_Music_5', 'JAW_LevelPack_Music_6',
-  'Cranky_Music_1', 'Cranky_Music_2', 'Cranky_Music_3', 'Cranky_Music_4',
-  'Allie_LevelPack_1', 'Allie_LevelPack_2',
-  'MD_MysteryDuck', 'MysteryDuck_LRS', 'Frankenweenie_LevelPack_1d', 'WMW_Birthday_Level',
+// reliable way to give a world your own song is to overwrite the audio tracks its
+// storyline plays. A world cycles through several tracks, so we replace the WHOLE
+// group for a character; that way the song plays no matter which track is picked.
+// (mp3s also ship STORED, see apk.js, or the game can't load a replaced track.)
+const MUSIC_GROUPS = [
+  { label: 'world.char.swampy', storyline: 0, tracks: ['JAW_LevelPack_Music_1', 'JAW_LevelPack_Music_2', 'JAW_LevelPack_Music_3', 'JAW_LevelPack_Music_4', 'JAW_LevelPack_Music_5', 'JAW_LevelPack_Music_6'] },
+  { label: 'world.char.cranky', storyline: 1, tracks: ['Cranky_Music_1', 'Cranky_Music_2', 'Cranky_Music_3', 'Cranky_Music_4'] },
+  { label: 'world.char.mystery', storyline: 3, tracks: ['MD_MysteryDuck', 'MysteryDuck_LRS', 'MD_BabyDuck', 'MD_MegaDuck'] },
+  { label: 'world.char.allie', storyline: 6, tracks: ['Allie_LevelPack_1', 'Allie_LevelPack_2'] },
 ];
-const STORYLINE_MUSIC = { 0: 'JAW_LevelPack_Music_1', 1: 'Cranky_Music_1', 3: 'MD_MysteryDuck', 6: 'Allie_LevelPack_1' };
+const groupForStoryline = (sl) => MUSIC_GROUPS.find((g) => g.storyline === sl) || MUSIC_GROUPS[0];
 
 /** "/Levels/foo" for a level browser entry, used as the LevelInfo Filename. */
 function levelFilename(entry) {
@@ -1036,10 +1074,8 @@ function showWorldBuilder(editWorld = null) {
     const iconSel = el('select', {}, ...WORLD_ICONS.map((ic) => el('option', { value: ic, text: ic, selected: cur && cur.packIcon === ic ? '' : null })));
     const tileSel = el('select', {}, ...WORLD_TILES.map((tt) => el('option', { value: tt, text: tt, selected: cur && cur.tileTexture === tt ? '' : null })));
     const iconFile = el('input', { type: 'file', accept: 'image/png,image/webp,image/jpeg' });
+    // music targets the world's own character (storyline), so just an mp3 upload
     const musicFile = el('input', { type: 'file', accept: 'audio/mpeg,.mp3' });
-    const defTrack = (cur && cur.musicTrack) || STORYLINE_MUSIC[cur ? (cur.storyline ?? 0) : 0] || MUSIC_TRACKS[0];
-    const musicSel = el('select', {}, ...MUSIC_TRACKS.map((tr) =>
-      el('option', { value: tr, text: tr, selected: tr === defTrack ? '' : null })));
 
     const picked = new Set(cur ? cur.levels.map((l) => l.filename) : []);
     const countLbl = el('span', { class: 'muted small' });
@@ -1091,12 +1127,13 @@ function showWorldBuilder(editWorld = null) {
       const mfile = musicFile.files?.[0];
       if (mfile) {
         const mbuf = new Uint8Array(await mfile.arrayBuffer());
-        state.vfs._put('assets/Audio/Music/' + musicSel.value + '.mp3', mbuf);
-        def.musicTrack = musicSel.value;
+        // overwrite every track this character's worlds cycle through
+        for (const tr of groupForStoryline(def.storyline).tracks) {
+          state.vfs._put('assets/Audio/Music/' + tr + '.mp3', mbuf);
+        }
         def.musicName = mfile.name;
         markDirty();
-      } else if (existing?.musicTrack) {
-        def.musicTrack = existing.musicTrack;
+      } else if (existing?.musicName) {
         def.musicName = existing.musicName;
       }
       if (editing != null) list[editing] = def; else list.push(def);
@@ -1143,9 +1180,7 @@ function showWorldBuilder(editWorld = null) {
       el('div', { class: 'field' }, el('label', { text: t('world.customIcon') }), iconFile),
       el('div', { class: 'field' },
         el('label', { text: t('world.music') }),
-        el('div', { class: 'row gap' },
-          el('div', { class: 'field grow' }, musicSel),
-          el('div', { class: 'field grow' }, musicFile)),
+        musicFile,
         el('p', { class: 'muted small', style: 'margin:2px 0 0',
           text: cur && cur.musicName ? t('world.musicCur', { name: cur.musicName }) : t('world.musicHint') })),
       el('div', { class: 'field' },

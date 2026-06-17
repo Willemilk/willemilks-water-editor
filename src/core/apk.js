@@ -34,7 +34,11 @@ export function rebuildApk(apkBytes, vfs, onProgress) {
   onProgress?.(`Repacking APK (${replaced} file${replaced === 1 ? '' : 's'} changed)…`);
   const zippable = {};
   for (const [name, data] of Object.entries(entries)) {
-    const stored = name.toLowerCase() === 'resources.arsc';
+    const lower = name.toLowerCase();
+    // resources.arsc must be STORED, and audio (mp3/ogg/wav) ships STORED in the
+    // original apk; deflating a replaced track stops the game loading it (silent
+    // custom music), so keep those uncompressed too.
+    const stored = lower === 'resources.arsc' || /\.(mp3|ogg|wav)$/.test(lower);
     zippable[name] = [data, { level: stored ? 0 : 6 }];
   }
   return zipSync(zippable);

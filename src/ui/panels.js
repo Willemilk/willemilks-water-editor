@@ -508,6 +508,9 @@ export class Inspector {
     const smart = this._smartSection(obj, kind);
     // objects of any kind can sit on a motor path; surface those props too
     const extraMotor = kind !== 'motor' && obj.properties.PathPos0 !== undefined ? this._motorSection(obj) : null;
+    // hinge/pivot props (a wall or arm that swings on a pin) get friendly controls
+    const isPivot = ['PinMinAngle', 'PinMaxAngle', 'PinOffset'].some((k) => obj.properties[k] !== undefined);
+    const extraPivot = isPivot ? this._pivotSection(obj) : null;
     const advOpen = this._advOpen ?? (kind === 'generic' && !smart);
 
     this.container.replaceChildren(
@@ -526,6 +529,7 @@ export class Inspector {
         el('div', { class: 'sep' }),
         smart,
         extraMotor,
+        extraPivot,
         this._attachmentBlock(obj),
         el('details', {
           class: 'adv-props',
@@ -855,14 +859,15 @@ export class Inspector {
     const hasExit = level.objects.some((o) => /basic_drain/i.test(o.properties.Filename || ''));
 
     // music: shown per level, but WMW maps music to worlds in native code, so it
-    // works by overwriting the chosen game track in the build (honest note below)
-    const tracks = this.cb.musicTracks || [];
-    const musicSel = tracks.length
-      ? el('select', {}, ...tracks.map((tr) => el('option', { value: tr, text: tr }))) : null;
-    const musicFile = tracks.length ? el('input', { type: 'file', accept: 'audio/mpeg,.mp3' }) : null;
+    // works by overwriting a character's whole track group in the build. Pick the
+    // character whose worlds should play your song, then upload the mp3.
+    const groups = this.cb.musicGroups || [];
+    const musicSel = groups.length
+      ? el('select', {}, ...groups.map((g, i) => el('option', { value: String(i), text: t(g.label) }))) : null;
+    const musicFile = groups.length ? el('input', { type: 'file', accept: 'audio/mpeg,.mp3' }) : null;
     if (musicFile) musicFile.onchange = () => {
       const f = musicFile.files?.[0];
-      if (f) this.cb.onReplaceMusic?.(musicSel.value, f);
+      if (f && musicSel) this.cb.onReplaceMusic?.(groups[+musicSel.value].tracks, f);
     };
 
     // any custom properties already on the level that we do not have a row for
@@ -888,7 +893,7 @@ export class Inspector {
           el('div', { class: 'row gap', style: 'align-items:center' },
             heightInp, el('span', { class: 'muted small', text: t('lset.lengthUnit') }))),
         el('p', { class: 'muted small', style: 'margin:2px 0 0', text: t('lset.lengthHint') })),
-      tracks.length
+      groups.length
         ? el('div', { class: 'smart-box', style: 'border-left-color:#c084fc' },
             el('div', { class: 'field' },
               el('label', { text: t('lset.music') }),
@@ -1139,6 +1144,18 @@ export class Inspector {
   }
 
   /** One connection slot: current target, pick in level, disconnect. */
+  /** Friendly hinge controls for a pivot object (a wall or arm that swings on a
+   *  pin). PinMinAngle/PinMaxAngle are the swing limits; PinOffset (the pivot
+   *  point, a vector) stays in Advanced. Objects glued on via Parent swing with it. */
+  _pivotSection(obj) {
+    const { num } = this._controls(obj);
+    return this._section('motor', 'sec.pivot',
+      el('p', { class: 'muted small', text: t('pivot.hint') }),
+      el('div', { class: 'row gap' },
+        num('PinMinAngle', 'pivot.min', '-90', '5'),
+        num('PinMaxAngle', 'pivot.max', '90', '5')));
+  }
+
   /** Universal "glue this object onto a moving part" block. Writes Parent=<name>,
    *  the real game property (1548 uses across the levels) that welds an object to
    *  a pivot, motor, fan arm, switch or any moving block so they move together
@@ -1211,8 +1228,13 @@ export class Inspector {
     const defaults = this.cb.getDefaults?.(obj) || {};
     const effType = obj.properties.SpoutType || defaults.SpoutType || 'OpenSpout';
     const effFluid = String(obj.properties.FluidType || defaults.FluidType || 'Water').toLowerCase();
-    // basic_drain.hs is the level exit, the drain the player has to get water to
-    const isExitDrain = /basic_drain/i.test(obj.properties.Filename || '');
+    // The level exit is a basic_drain that just swallows water (no output spout).
+    // Most basic_drains in real levels redirect water (they have a ConnectedSpout,
+    // 933 of them) so they are plumbing, not the exit; only a terminal one is the
+    // drain the player has to fill to finish.
+    const isBasicDrain = /basic_drain/i.test(obj.properties.Filename || '');
+    const redirects = Object.keys(obj.properties).some((k) => /^ConnectedSpout\d*$/.test(k) && obj.properties[k]);
+    const isExitDrain = isBasicDrain && !redirects;
 
     const behavior = el('select', {},
       ...[['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')],
@@ -1465,7 +1487,7 @@ export function propertySuggestions() {
 
 export function materialPalette(container, current, onPick) {
   container.replaceChildren(
-    ...MATERIALS.map((m) =>
+    ...MATERIALS.filter((m) => m.paint !== false).map((m) =>
       el('button', {
         class: 'mat' + (m.id === current ? ' active' : ''),
         title: `${t('mat.' + m.id)}. ${m.desc}`,

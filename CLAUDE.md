@@ -116,6 +116,26 @@ re-applies them to the VFS db on every playtest and forces resetData. Custom lev
 exist in the VFS (saveIntoVFS) for the LevelInfo rows to resolve in game. Both features only
 take effect after a data reset (same water.db copy-on-first-run caveat as challenges).
 
+## Fixes + music/new-level (v1.11.0)
+- EXIT DRAIN: the label only shows on a basic_drain with NO ConnectedSpout (a terminal sink).
+  Most basic_drains redirect water (933 have a ConnectedSpout, 188 levels have >1 basic_drain),
+  so they are plumbing, not the exit; the old "any basic_drain = exit" was wrong.
+- LEVEL LENGTH RESIZE: Terrain.resizeHeight changes the offscreen terrainCanvas size, so
+  onResize now calls editor.refreshTerrain() (re-syncs that canvas) THEN fitView(); without the
+  re-sync the old canvas was drawn stretched until the level was reopened.
+- MUSIC actually works now: (1) apk.js keeps audio (mp3/ogg/wav) STORED like the original (all
+  66 game mp3s are STORED; deflating a replacement made the game fail to load it = silence).
+  (2) music replaces a character's WHOLE track group (MUSIC_GROUPS in main.js), not one track,
+  so it plays whichever track the world picks. World builder targets the world's own storyline;
+  level settings has a character dropdown. cb.onReplaceMusic(tracks[], file).
+- NEW LEVEL flow: newLevel() is now a dialog (name + "Add to world" dropdown, full worlds at
+  20 disabled). It createLevel + saveCurrent + appends to the chosen world's levels +
+  applyAllWorlds, so the level is visible in game instead of an orphan file.
+- PAINT PALETTE: Rock shadow/Rock highlight have paint:false (materials.js) so they are hidden
+  from the palette (the smart rock pass derives those rims); still recognized in existing levels.
+- PIVOT/HINGE: objects with PinMinAngle/PinMaxAngle/PinOffset get a friendly _pivotSection
+  (swing min/max angle); PinOffset stays in Advanced. Pairs with the Parent attachment.
+
 ## Object attachment + browser UX (v1.10.0)
 - ATTACH / GLUE: objects ride a moving block via the real `Parent` property (1548 uses across
   the levels, e.g. a touch_spout with Parent="SprayPivot" rides a wall pivot). Inspector shows
