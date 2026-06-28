@@ -6,6 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 
+// Discord Rich Presence. Guarded so a problem loading it can never stop the app.
+let discord = null;
+try { discord = require('./discord.cjs'); } catch { discord = null; }
+
 let win = null;
 
 function send(action, payload) {
@@ -115,6 +119,16 @@ async function openGameDialog() {
 }
 
 ipcMain.handle('open-game', () => openGameDialog());
+
+// Discord Rich Presence: the renderer tells us what it is doing and whether the
+// feature is enabled. Everything is best effort and wrapped so it cannot throw.
+ipcMain.on('discord-presence', (_e, msg) => {
+  if (!discord || !msg) return;
+  try {
+    if (typeof msg.enabled === 'boolean') discord.setEnabled(msg.enabled);
+    if (msg.activity) discord.update(msg.activity);
+  } catch { /* never let presence affect the editor */ }
+});
 
 // toolbar toggles mirror into the native View menu checkboxes
 ipcMain.on('menu-state', (_e, { id, checked }) => {
@@ -282,6 +296,8 @@ app.whenReady().then(() => {
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
+
+app.on('before-quit', () => { try { discord?.shutdown(); } catch {} });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

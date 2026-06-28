@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('native', {
   syncMenu(id, checked) {
     ipcRenderer.send('menu-state', { id, checked });
   },
+  /** Update Discord Rich Presence. payload = { enabled, activity:{details,state,smallText} }. */
+  setDiscordPresence(payload) {
+    ipcRenderer.send('discord-presence', payload);
+  },
   /** Store the loaded APK in userData so the next session resumes in one click. */
   cacheApk(name, data) {
     const buf = data instanceof Uint8Array ? data : new Uint8Array(data);

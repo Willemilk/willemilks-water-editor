@@ -24,7 +24,44 @@ const state = {
   level: null,
   editor: null,
   placing: null, // object waiting for a placement click
+  rpcMode: 'menu', // drives Discord Rich Presence: menu | editing | worlds | playtest
 };
+
+// ============================================================ Discord presence
+// Tell the native shell what we are doing so it can show Rich Presence. In the
+// browser there is no window.native, so all of this is a silent no op.
+
+/** Reuse the level browser's own grouping to name a level's world. */
+function levelWorldInfo(name) {
+  const packs = state.levelBrowser?.packs || [];
+  for (const p of packs) {
+    const hit = p.entries?.find((e) => e.entry?.name === name);
+    if (hit) return { title: hit.title || name, world: p.title || '' };
+  }
+  return { title: name, world: '' };
+}
+
+function pushPresence() {
+  if (!window.native?.setDiscordPresence) return;
+  const enabled = getPref('discordRPC', true);
+  let details = t('rpc.menu');
+  let stateLine;
+  if (state.rpcMode === 'playtest') {
+    details = t('rpc.playtest');
+    if (state.level) stateLine = levelWorldInfo(state.level.name).title;
+  } else if (state.rpcMode === 'worlds') {
+    details = t('rpc.worlds');
+  } else if (state.level) {
+    details = t('rpc.editing');
+    const info = levelWorldInfo(state.level.name);
+    stateLine = info.world ? `${info.title} · ${info.world}` : info.title;
+  }
+  try {
+    window.native.setDiscordPresence({ enabled, activity: { details, state: stateLine, smallText: t('rpc.small') } });
+  } catch { /* never let presence break the editor */ }
+}
+
+function setRpcMode(mode) { state.rpcMode = mode; pushPresence(); }
 
 // ============================================================ welcome screen
 
@@ -593,6 +630,7 @@ async function openLevel(entry) {
     state.inspector.setObject(null);
     updateUndoButtons();
     setPref('lastLevel', entry.name);
+    setRpcMode('editing');
     setBusy(null);
   } catch (err) {
     setBusy(null);
@@ -817,6 +855,7 @@ function dispatchKey(key, mods = {}) {
 
 wireNative();
 renderWelcome();
+pushPresence(); // start in the menu state (no op in the browser)
 
 // ============================================================ modal prompt (Electron has no window.prompt)
 
@@ -864,6 +903,9 @@ function showSettings() {
   const smart = el('input', { type: 'checkbox' });
   smart.checked = getPref('smartTerrain', true);
 
+  const discordToggle = el('input', { type: 'checkbox' });
+  discordToggle.checked = getPref('discordRPC', true);
+
   const resetData = el('input', { type: 'checkbox' });
   resetData.checked = pt.resetData;
 
@@ -902,6 +944,9 @@ function showSettings() {
       el('label', { class: 'check-row' }, smart, el('span', {},
         el('strong', { text: t('settings.smart') }),
         el('span', { class: 'muted small', text: ' ' + t('settings.smartSub') }))),
+      isApp ? el('label', { class: 'check-row' }, discordToggle, el('span', {},
+        el('strong', { text: t('settings.discord') }),
+        el('span', { class: 'muted small', text: ' ' + t('settings.discordSub') }))) : null,
       el('div', { class: 'sep' }),
       el('h4', { text: t('settings.playtest') }),
       isApp ? null : el('p', { class: 'muted small', text: t('settings.webNote') }),
@@ -935,6 +980,8 @@ function showSettings() {
     setPref('smartTerrain', smart.checked);
     if (state.editor) state.editor.smartTerrain = smart.checked;
     window.native?.syncMenu?.('menu-smart', smart.checked);
+    setPref('discordRPC', discordToggle.checked);
+    pushPresence(); // apply the toggle (connect or clear) right away
     setPref('playtest', {
       ...Object.fromEntries(Object.entries(fields).map(([k, inp]) => [k, inp.value.trim()])),
       resetData: resetData.checked,
@@ -1053,6 +1100,15 @@ function showWorldBuilder(editWorld = null) {
   const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
   const card = el('div', { class: 'welcome-card modal-card settings-card' });
   overlay.append(card);
+
+  // reflect "managing worlds" in Discord presence, restored on any close path
+  if (window.native?.setDiscordPresence) {
+    setRpcMode('worlds');
+    const obs = new MutationObserver(() => {
+      if (!document.body.contains(overlay)) { obs.disconnect(); setRpcMode(state.level ? 'editing' : 'menu'); }
+    });
+    obs.observe(document.body, { childList: true });
+  }
 
   async function reorderWorld(i, dir) {
     const list = getPref('customWorlds', []);
@@ -1233,6 +1289,7 @@ async function runPlaytest() {
   }
 
   ptRunning = true;
+  setRpcMode('playtest');
   const ptBtn = document.getElementById('btn-playtest');
   if (ptBtn) { ptBtn.disabled = true; ptBtn.textContent = t('pt.btnBusy'); }
   try {
@@ -1267,6 +1324,7 @@ async function runPlaytest() {
     status.className = 'error small';
   } finally {
     ptRunning = false;
+    setRpcMode(state.level ? 'editing' : 'menu');
     closeBtn.disabled = false;
     if (ptBtn) { ptBtn.disabled = false; ptBtn.textContent = '▶ ' + t('btn.playtest'); }
   }
