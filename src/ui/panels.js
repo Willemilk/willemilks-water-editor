@@ -16,29 +16,9 @@ const FLUIDS = [
   ['drymud', 'spout.f.drymud'],
 ];
 
-// generators are powered by one of these fluids (AllowedFluids in the .hs)
-const GEN_FLUIDS = [
-  ['water', 'spout.f.water'],
-  ['steam', 'spout.f.steam'],
-  ['blackooze', 'gen.f.ooze'],
-];
-
-// temperature rays: TemperatureType drives what they do to the fluid they hit
-const RAY_TYPES = [
-  ['hot', 'ray.t.hot'],
-  ['cold', 'ray.t.cold'],
-  ['sludge', 'ray.t.sludge'],
-  ['matter', 'ray.t.matter'],
-  ['turf', 'ray.t.turf'],
-];
-
-// collectibles (ducks/stars): GnomeType is the Perry mod field; the real WMW
-// game uses StarType (baby/allie/mega ducks, music note, teleporter).
-const GNOME_TYPES = [
-  ['water', 'gnome.water'],
-  ['steam', 'gnome.steam'],
-  ['sludge', 'gnome.sludge'],
-];
+// collectibles (ducks): the real WMW game keys ducks by StarType
+// (baby/allie/mega ducks, music note, teleporter). GnomeType was a Perry mod
+// field (0 of 636 levels author it) and has been dropped.
 const STAR_TYPES = [
   ['baby', 'star.baby'],
   ['allie', 'star.allie'],
@@ -408,10 +388,6 @@ const KIND_COLORS = {
   sprinkler: '#38bdf8',
   motor: '#94a6bb',
   collectible: '#fbbf24',
-  ray: '#fb7185',
-  generator: '#a3e635',
-  pipe: '#a8a29e',
-  mirror: '#67e8f9',
   attach: '#f472b6',
   generic: '#5c6f85',
 };
@@ -420,8 +396,7 @@ const KIND_SECTION_KEY = {
   bomb: 'sec.bomb', fan: 'sec.fan', vacuum: 'sec.vacuum', balloon: 'sec.balloon', switch: 'sec.switch',
   converter: 'sec.converter', ypipe: 'sec.ypipe', brokenpipe: 'sec.brokenpipe',
   teleport: 'sec.teleport', sprinkler: 'sec.sprinkler', motor: 'sec.motor',
-  ray: 'sec.ray', collectible: 'sec.collectible', generator: 'sec.generator',
-  pipe: 'sec.pipe', mirror: 'sec.mirror',
+  collectible: 'sec.collectible',
 };
 
 export class Inspector {
@@ -447,8 +422,6 @@ export class Inspector {
     if (/bomb|mine/.test(fn)) return 'bomb';
     if (/vacuum/.test(fn)) return 'vacuum';
     if (/fan/.test(fn)) return 'fan';
-    if (type === 'temperatureray' || p.TemperatureType !== undefined || p.RayAngle !== undefined) return 'ray';
-    if (type === 'generator' || p.GeneratorSprites !== undefined) return 'generator';
     if (/balloon|bubble/.test(fn)) return 'balloon';
     if (/y[_-]?switch|pipe_y/.test(fn) || p.YSwitchPosition !== undefined) return 'ypipe';
     if (/switch|lever/.test(fn) || p.SwitchType !== undefined) return 'switch';
@@ -458,10 +431,8 @@ export class Inspector {
     if (/sprinkler/.test(fn) || p.SprinklerWidth !== undefined) return 'sprinkler';
     if (type === 'spout' || /spout|drain|faucet|shower|valve/.test(fn) || p.SpoutType !== undefined) return 'spout';
     if (type === 'star' || type === 'collectible' || p.StarType !== undefined || p.GnomeType !== undefined || /star|duck|note|collect|gnome/.test(fn)) return 'collectible';
-    // motors first: a pivoting mirror wall has motor props and should stay a motor
+    // any object the level animates with a motor path stays a motor
     if (p.PathPos0 !== undefined || p.MotorMoveSpeed !== undefined || p.MotorOn !== undefined || p.MotorTurnSpeed !== undefined) return 'motor';
-    if (type === 'mirror' || /mirror/.test(fn)) return 'mirror';
-    if (type === 'pipe' || p.PipeType !== undefined || p.PipeWidth !== undefined) return 'pipe';
     return 'generic';
   }
 
@@ -597,13 +568,29 @@ export class Inspector {
       case 'teleport': return this._teleportSection(obj);
       case 'sprinkler': return this._sprinklerSection(obj);
       case 'motor': return this._motorSection(obj);
-      case 'ray': return this._raySection(obj);
-      case 'generator': return this._generatorSection(obj);
       case 'collectible': return this._collectibleSection(obj);
-      case 'pipe': return this._pipeSection(obj);
-      case 'mirror': return this._mirrorSection(obj);
-      default: return this._genericPhysicsSection(obj);
+      default: {
+        // recognizable but property-free types get an honest info note; any
+        // real physics props on a plain object still get their controls
+        const info = this._infoNote(obj);
+        const phys = this._genericPhysicsSection(obj);
+        return (info && phys) ? el('div', {}, info, phys) : (info || phys);
+      }
     }
+  }
+
+  /** A short read only note for object types that have a clear identity but no
+   *  level editable properties (their behaviour is baked into the variant .hs).
+   *  Verified: none of these author anything but Angle across the 636 levels. */
+  _infoNote(obj) {
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const type = (obj.type || defaults.Type || '').toLowerCase();
+    const key = {
+      icyhot: 'info.icyhot', dirtywall: 'info.dirtywall', algaehider: 'info.algae',
+      mysterycave: 'info.mystery', floater: 'info.floater',
+    }[type];
+    if (!key) return null;
+    return this._section('generic', 'sec.about', el('p', { class: 'muted small', text: t(key) }));
   }
 
   /** Shared small controls. Every write goes through set(): push undo,
@@ -652,11 +639,11 @@ export class Inspector {
 
   _bombSection(obj) {
     const { num } = this._controls(obj);
+    // GravityScale dropped: bomb.hs has no such default and 0 of 636 levels set it
     return this._section('bomb', 'sec.bomb',
       el('div', { class: 'row gap' },
         num('BlastRadius', 'prop.blastRadius', '5', '0.5'),
-        num('BlastPower', 'prop.blastPower', '4000', '100')),
-      num('GravityScale', 'prop.gravity', '0', '0.1'));
+        num('BlastPower', 'prop.blastPower', '4000', '100')));
   }
 
   _fanSection(obj) {
@@ -702,7 +689,7 @@ export class Inspector {
   }
 
   _balloonSection(obj) {
-    const { num, chk } = this._controls(obj);
+    const { num } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
     // InitialParticles is "<fluid> <count>" in the game ("water 70", "Steam 50", …)
     const init = String(obj.properties.InitialParticles || defaults.InitialParticles || 'water 10').trim().split(/\s+/);
@@ -718,20 +705,15 @@ export class Inspector {
     const countInp = el('input', { type: 'number', step: '5', min: '0', value: curCount });
     fluidSel.onchange = write;
     countInp.onchange = write;
-    // HasString / FingerPoppable are Perry mod fields; only show them when the
-    // balloon actually carries one, so WMW balloons do not get dead toggles
-    const hasPerryFlags = ['HasString', 'FingerPoppable'].some((k) =>
-      obj.properties[k] !== undefined || defaults[k] !== undefined);
+    // VelDamping / HasString / FingerPoppable dropped: not in balloon.hs and 0 of
+    // 636 levels author them (HasString/FingerPoppable are Perry mod fields)
     return this._section('balloon', 'sec.balloon',
       el('div', { class: 'row gap' },
         el('div', { class: 'field grow' }, el('label', { text: t('prop.initialFluid') }), fluidSel),
         el('div', { class: 'field grow' }, el('label', { text: t('prop.initialCount') }), countInp)),
       num('MaxParticles', 'prop.maxParticles', '70', '5'),
       this._connPicker(obj, 'ConnectedSpout', t('conn.balloon')),
-      num('GravityScale', 'prop.buoyancy', '', '0.1'),
-      num('VelDamping', 'prop.damping', '', '0.01'),
-      hasPerryFlags ? chk('HasString', 'prop.hasString') : null,
-      hasPerryFlags ? chk('FingerPoppable', 'prop.poppable') : null);
+      num('GravityScale', 'prop.buoyancy', '', '0.1'));
   }
 
   _connSlots(obj, prefix) {
@@ -1029,27 +1011,52 @@ export class Inspector {
   }
 
   _ypipeSection(obj) {
-    const { sel } = this._controls(obj);
+    // A y-switch routes its inflow to one of two outputs (ConnectedSpout0 = left,
+    // ConnectedSpout1 = right). FirstLeftSpout/FirstRightSpout (one is 1) say which
+    // side starts open. The old "left/right" string on YSwitchPosition was wrong:
+    // the real field is 0/1 and the outputs are the ConnectedSpout slots.
+    const defaults = this.cb.getDefaults?.(obj) || {};
+    const startRight = String(obj.properties.FirstRightSpout ?? defaults.FirstRightSpout ?? '1') === '1';
+    const startSel = el('select', {},
+      el('option', { value: 'left', text: t('ypipe.left'), selected: startRight ? null : '' }),
+      el('option', { value: 'right', text: t('ypipe.right'), selected: startRight ? '' : null }));
+    startSel.onchange = () => {
+      this.cb.push();
+      const r = startSel.value === 'right';
+      obj.properties.FirstRightSpout = r ? '1' : '0';
+      obj.properties.FirstLeftSpout = r ? '0' : '1';
+      this.cb.onEdit();
+    };
     return this._section('ypipe', 'sec.ypipe',
-      sel('YSwitchPosition', 'prop.switchType', [['left', 'left'], ['right', 'right']], 'left'),
-      this._connPicker(obj, 'ConnectedYSwitchPort0', t('conn.switch')),
+      this._connPicker(obj, 'ConnectedSpout0', t('ypipe.outLeft')),
+      this._connPicker(obj, 'ConnectedSpout1', t('ypipe.outRight')),
+      el('div', { class: 'field' }, el('label', { text: t('ypipe.startOpen') }), startSel),
       this._connPicker(obj, 'ConnectedConverter', t('conn.converter')),
       el('p', { class: 'muted small', text: t('conv.ypipeHint') }));
   }
 
   _brokenpipeSection(obj) {
-    const { num } = this._controls(obj);
+    // A broken pipe is a DrainSpout that leaks its fluid out of a connected spout
+    // (ConnectedSpout0, set on 588 of them). The old GravityScale control was dead
+    // (broken_pipe.hs has no such default, 0 levels set it).
     return this._section('brokenpipe', 'sec.brokenpipe',
-      num('GravityScale', 'prop.gravity', '0', '0.1'));
+      el('p', { class: 'muted small', text: t('brokenpipe.hint') }),
+      this._outputSpoutBlock(obj));
   }
 
   _teleportSection(obj) {
-    const { num } = this._controls(obj);
+    // Teleporters do NOT link by a property (0 author ConnectedObject0); the game
+    // pairs them. Real authored fields: TeleportWaitTime (250), TeleportMoveTime
+    // (197), CutsRock (189), TeleportMoveEase (92), Burst (25).
+    const { num, chk, sel } = this._controls(obj);
     return this._section('teleport', 'sec.teleport',
-      this._connPicker(obj, 'ConnectedObject0', t('conn.exit')),
       el('div', { class: 'row gap' },
         num('TeleportWaitTime', 'prop.teleWait', '', '0.1'),
-        num('TeleportMoveTime', 'prop.teleTime', '', '0.1')));
+        num('TeleportMoveTime', 'prop.teleTime', '', '0.1')),
+      sel('TeleportMoveEase', 'prop.teleEase', [['both', 'tele.ease.both'], ['in', 'tele.ease.in']], 'both'),
+      chk('CutsRock', 'prop.teleCutsRock'),
+      chk('Burst', 'prop.teleBurst'),
+      el('p', { class: 'muted small', text: t('tele.hint') }));
   }
 
   _sprinklerSection(obj) {
@@ -1080,55 +1087,20 @@ export class Inspector {
       el('p', { class: 'muted small', text: t('motor.hint') }));
   }
 
-  /** Temperature ray: heats, freezes or contaminates the fluid it hits. */
-  _raySection(obj) {
-    const { num, sel } = this._controls(obj);
-    const defaults = this.cb.getDefaults?.(obj) || {};
-    return this._section('ray', 'sec.ray',
-      sel('TemperatureType', 'prop.rayType', RAY_TYPES, defaults.TemperatureType || 'hot'),
-      sel('RayBeamType', 'prop.rayBeam', [['', 'ray.b.cont'], ['touch', 'ray.b.touch']], defaults.RayBeamType || ''),
-      num('RayAngle', 'prop.rayAngle', '0', '5'),
-      el('p', { class: 'muted small', text: t('ray.hint') }));
-  }
-
-  /** Generator: powered while a fluid runs over it, drives connected objects. */
-  _generatorSection(obj) {
+  /** Collectible: a duck (Type=star) keyed by StarType, or a hidden collectible
+   *  (Type=collectible) whose CollectibleID is intrinsic to the variant. CutRadius
+   *  (0 authored) and the Perry mod GnomeType (0 authored) were dropped. */
+  _collectibleSection(obj) {
     const { sel } = this._controls(obj);
     const defaults = this.cb.getDefaults?.(obj) || {};
-    return this._section('generator', 'sec.generator',
-      sel('AllowedFluids', 'prop.genFluid', GEN_FLUIDS, defaults.AllowedFluids || 'water'),
-      this._groupMembersBlock(obj),
-      el('p', { class: 'muted small', text: t('gen.hint') }));
-  }
-
-  /** Collectible (duck/star): the fluid type that can pick it up. */
-  _collectibleSection(obj) {
-    const { num, sel } = this._controls(obj);
-    const defaults = this.cb.getDefaults?.(obj) || {};
-    const rows = [
-      sel('StarType', 'prop.starType', STAR_TYPES, defaults.StarType || 'baby'),
-      num('CutRadius', 'prop.cutRadius', '6', '0.5'),
-    ];
-    // the Perry mod variant keys ducks by GnomeType instead; show it when present
-    if (obj.properties.GnomeType !== undefined || defaults.GnomeType !== undefined) {
-      rows.push(sel('GnomeType', 'prop.gnomeType', GNOME_TYPES, defaults.GnomeType || 'water'));
+    const hasStarType = obj.properties.StarType !== undefined || defaults.StarType !== undefined;
+    if (hasStarType) {
+      return this._section('collectible', 'sec.collectible',
+        sel('StarType', 'prop.starType', STAR_TYPES, defaults.StarType || 'baby'),
+        el('p', { class: 'muted small', text: t('coll.hint') }));
     }
-    rows.push(el('p', { class: 'muted small', text: t('coll.hint') }));
-    return this._section('collectible', 'sec.collectible', ...rows);
-  }
-
-  /** Pipe: visual routing guide. Width plus a note about how flow really works. */
-  _pipeSection(obj) {
-    const { num } = this._controls(obj);
-    return this._section('pipe', 'sec.pipe',
-      num('PipeWidth', 'prop.pipeWidth', '1.4', '0.1'),
-      el('p', { class: 'muted small', text: t('pipe.hint') }));
-  }
-
-  /** Mirror: rotate to bounce a temperature ray toward its target. */
-  _mirrorSection(obj) {
-    return this._section('mirror', 'sec.mirror',
-      el('p', { class: 'muted small', text: t('mirror.hint') }));
+    return this._section('collectible', 'sec.collectible',
+      el('p', { class: 'muted small', text: t('coll.idHint') }));
   }
 
   /** Physics quick controls, only for properties the object actually has. */
@@ -1138,7 +1110,6 @@ export class Inspector {
     if (obj.properties.GravityScale !== undefined) rows.push(num('GravityScale', 'prop.gravity', '', '0.1'));
     if (obj.properties.Draggable !== undefined) rows.push(chk('Draggable', 'prop.draggable'));
     if (obj.properties.Interactive !== undefined) rows.push(chk('Interactive', 'prop.interactive'));
-    if (obj.properties.VelDamping !== undefined) rows.push(num('VelDamping', 'prop.damping', '', '0.01'));
     if (!rows.length) return null;
     return this._section('generic', 'sec.physics', ...rows);
   }
@@ -1305,6 +1276,12 @@ export class Inspector {
     onTime.onchange = applyTimer;
     offTime.onchange = applyTimer;
 
+    // Blockable: real spout flag (authored on 46 spouts) — the stream can be
+    // blocked by terrain in front of the mouth instead of pushing through it
+    const blockable = el('input', { type: 'checkbox' });
+    blockable.checked = (obj.properties.Blockable ?? defaults.Blockable) === '1';
+    blockable.onchange = () => set('Blockable', blockable.checked ? '1' : '');
+
     return el('div', { class: 'spout-box' },
       el('h4', { text: t('spout.title') }),
       isExitDrain
@@ -1324,6 +1301,7 @@ export class Inspector {
             el('div', { class: 'field grow' }, el('label', { text: t('prop.expulsionSpread') }), spread))
         : null,
       drainBlock,
+      canExpel ? el('label', { class: 'check-row' }, blockable, el('span', { text: t('prop.blockable') })) : null,
       el('label', { class: 'check-row' }, timerChk, el('span', { text: t('spout.timer') })),
       hasTimer
         ? el('div', { class: 'row gap' },
@@ -1389,8 +1367,7 @@ export class Inspector {
     }
     if (key === 'FluidType' || /^FluidType\d+$/.test(key)) return dropdown(FLUIDS.map(([v, lk]) => [v, t(lk)]), true);
     if (key === 'SpoutType') return dropdown([['OpenSpout', t('spout.b.open')], ['TouchSpout', t('spout.b.touch')], ['Drain', t('spout.b.drain')], ['DrainSpout', t('spout.b.drainspout')]]);
-    if (key === 'GnomeType') return dropdown(GNOME_TYPES.map(([v, lk]) => [v, t(lk)]), true);
-    if (key === 'TemperatureType') return dropdown(RAY_TYPES.map(([v, lk]) => [v, t(lk)]), true);
+    if (key === 'StarType') return dropdown(STAR_TYPES.map(([v, lk]) => [v, t(lk)]), true);
     const inp = el('input', { value: record[key], onchange: (e) => set(e.target.value) });
     return inp;
   }
