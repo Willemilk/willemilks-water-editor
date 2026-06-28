@@ -19,11 +19,27 @@
   --danger: #ff5d5d;
   --warn: #ffb454;
   --ok: #3ddc84;
+  --line-strong: #3a4d68;   /* stronger hover border, one source of truth */
   --radius: 10px;
   --radius-sm: 7px;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* ---- design tokens (one consistent scale, applied across the app) ---- */
+  /* spacing */
+  --sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 22px;
+  /* radius scale (the two above are kept as aliases for older rules) */
+  --r-sm: 7px; --r-md: 10px; --r-lg: 14px;
+  /* one accent per context: blue = tools, green = connections, amber = settings */
+  --accent-tools: #2ea7ff;
+  --accent-conn: #3ddc84;
+  --accent-settings: #ffb454;
+  /* interaction */
+  --ring: 0 0 0 3px var(--accent-soft);
+  --focus: 2px solid var(--accent);
+  --t-fast: 0.12s ease;
+  --t-med: 0.2s ease;
 }
 
 * { box-sizing: border-box; }
@@ -56,8 +72,13 @@ input, select {
   outline: none;
   min-width: 0;
 }
-input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:focus, select:focus { border-color: var(--accent); box-shadow: var(--ring); }
 input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: var(--accent); }
+
+/* keyboard focus ring: shows on Tab navigation, stays out of the way on click.
+   Inputs already draw their own border + ring, so they opt out of the outline. */
+:focus-visible { outline: var(--focus); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
 
 /* ---------------- generic helpers ---------------- */
 .row { display: flex; align-items: stretch; }
@@ -89,7 +110,7 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   white-space: nowrap;
   transition: background 0.12s, border-color 0.12s, transform 0.05s;
 }
-.btn:hover { background: var(--bg-3); border-color: #3a4d68; }
+.btn:hover { background: var(--bg-3); border-color: var(--line-strong); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.4; cursor: default; transform: none; }
 .btn.primary {
@@ -123,6 +144,29 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   font-size: 13px;
 }
 .icon-btn:hover { background: var(--bg-3); color: var(--text); }
+
+/* ---------------- micro interactions ---------------- */
+.list-item, .tool-btn, .tab, .mat, .obj-card, .icon-btn, .obj-group summary,
+.smart-box, .group-box, .group-row, .adv-props summary, .help-btn {
+  transition: background var(--t-fast), border-color var(--t-fast),
+    color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+.obj-card:hover { transform: translateY(-1px); }
+.tab:active, .tool-btn:active, .icon-btn:active, .list-item:active, .mat:active { transform: translateY(1px); }
+
+/* soft entrance for modal dialogs, kept subtle (no heavy animation) */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
+.modal-overlay { animation: overlay-in var(--t-med); }
+.modal-overlay .modal-card { animation: modal-in 0.18s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
 
 /* ---------------- app shell ---------------- */
 .shell {
@@ -352,7 +396,7 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   white-space: nowrap;
   flex: 0 0 auto;
 }
-.mat:hover { border-color: #3a4d68; color: var(--text); }
+.mat:hover { border-color: var(--line-strong); color: var(--text); }
 .mat.lit {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -420,7 +464,9 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
 }
 .insp-head h3 { margin: 0; font-size: 14px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 9px; }
@@ -746,6 +792,8 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
 .modal-card h3 { margin: 0 0 14px; font-size: 17px; }
 .modal-card h4 { margin: 4px 0 10px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; }
 .settings-card { width: min(560px, calc(100vw - 32px)); }
+/* amber = the settings context, applied to its section headers */
+.settings-card h4 { color: var(--accent-settings); }
 .check-row {
   display: flex;
   align-items: flex-start;
@@ -755,6 +803,39 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   margin: 4px 0;
 }
 .check-row input { margin-top: 3px; accent-color: var(--accent); flex: 0 0 auto; width: 15px; height: 15px; }
+
+/* ---------------- command palette (Ctrl/Cmd+K) ---------------- */
+.cmd-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 14vh;
+  background: rgba(4, 8, 14, 0.6);
+  animation: overlay-in var(--t-med);
+}
+.cmd-panel {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: modal-in 0.18s ease;
+}
+.cmd-input {
+  width: 100%; border: none; border-radius: 0; background: transparent;
+  padding: 14px 16px; font-size: 15px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.cmd-input:focus { box-shadow: none; border-color: var(--line-soft); }
+.cmd-list { max-height: 46vh; overflow-y: auto; padding: var(--sp-2); }
+.cmd-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: var(--r-sm);
+  cursor: pointer; color: var(--text-dim); font-size: 13.5px;
+}
+.cmd-item.sel { background: var(--accent-soft); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.cmd-empty { padding: 16px; text-align: center; }
+.cmd-foot { padding: 8px 14px; border-top: 1px solid var(--line-soft); }
 
 /* playtest log */
 .pt-card { width: min(620px, calc(100vw - 32px)); }
@@ -796,12 +877,23 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
   border-radius: var(--radius-sm);
   padding: 11px 12px 6px;
   margin-bottom: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 .smart-box h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin: 0 0 10px;
   font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.7px;
+}
+/* a small accent dot before the section title, in the section's own color */
+.smart-box h4::before {
+  content: '';
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor; flex: 0 0 auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
 }
 .obj-badge {
   font-size: 10px;
@@ -817,24 +909,28 @@ input[type='range'] { padding: 0; border: none; box-shadow: none; accent-color: 
 
 /* advanced raw properties fold */
 .adv-props {
-  margin: 4px 0 8px;
+  margin: 10px 0 8px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: var(--bg-1);
+  overflow: hidden;
 }
 .adv-props summary {
   list-style: none;
   cursor: pointer;
-  padding: 8px 11px;
-  font-size: 12px;
+  padding: 9px 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  color: var(--text-dim);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-faint);
   user-select: none;
 }
 .adv-props summary::-webkit-details-marker { display: none; }
 .adv-props summary::before { content: '▸ '; font-size: 10px; }
 .adv-props[open] summary::before { content: '▾ '; }
-.adv-props summary:hover { color: var(--text); }
+.adv-props summary:hover { color: var(--text); background: var(--bg-2); }
+.adv-props[open] summary { border-bottom: 1px solid var(--line-soft); color: var(--text-dim); }
 .adv-props .kv { padding: 0 10px 10px; }
 
 /* connection picker rows */

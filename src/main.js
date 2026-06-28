@@ -851,11 +851,94 @@ function dispatchKey(key, mods = {}) {
   window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, ...mods }));
 }
 
+// ============================================================ command palette
+// A Ctrl/Cmd+K launcher. Every entry only calls a handler the existing UI
+// already calls, so this adds no new editor logic. It is bound to a key combo
+// nothing else uses, and it filters to actions valid in the current context.
+
+function commandList() {
+  const ed = state.editor;
+  const click = (id) => document.getElementById(id)?.click();
+  const all = [
+    { label: t('btn.newLevel'), run: () => newLevel(), need: 'vfs' },
+    { label: t('btn.save'), run: () => saveCurrent(), need: 'level' },
+    { label: t('btn.playtest'), run: () => runPlaytest(), need: 'app' },
+    { label: t('btn.worlds'), run: () => showWorldBuilder(), need: 'vfs' },
+    { label: t('btn.fit'), run: () => ed?.fitView(), need: 'level' },
+    { label: t('btn.undo'), run: () => ed?.doUndo(), need: 'level' },
+    { label: t('btn.redo'), run: () => ed?.doRedo(), need: 'level' },
+    { label: t('toggle.grid'), run: () => click('btn-grid'), need: 'level' },
+    { label: t('toggle.collision'), run: () => click('btn-coll'), need: 'level' },
+    { label: t('toggle.paths'), run: () => click('btn-paths'), need: 'level' },
+    { label: t('conn.show'), run: () => click('btn-conns'), need: 'level' },
+    { label: t('cmd.tutorial'), run: () => startTutorial(), need: 'editor' },
+    { label: t('settings.title'), run: () => showSettings() },
+  ];
+  return all.filter((c) =>
+    c.need === 'app' ? !!window.native?.isApp
+      : c.need === 'vfs' ? !!state.vfs
+      : c.need === 'level' ? !!state.level
+      : c.need === 'editor' ? !!state.editor
+      : true);
+}
+
+function showCommandPalette() {
+  if (document.querySelector('.cmd-overlay')) return;
+  const cmds = commandList();
+  let items = cmds;
+  let sel = 0;
+  const input = el('input', { type: 'text', class: 'cmd-input', placeholder: t('cmd.placeholder'), autocomplete: 'off', spellcheck: 'false' });
+  const list = el('div', { class: 'cmd-list' });
+  const overlay = el('div', { class: 'cmd-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
+  overlay.append(el('div', { class: 'cmd-panel' }, input, list,
+    el('div', { class: 'cmd-foot muted small', text: t('cmd.hint') })));
+
+  function close() { overlay.remove(); }
+  function choose(i) { const c = items[i]; close(); if (c) { try { c.run(); } catch (err) { console.error(err); } } }
+  function render() {
+    list.replaceChildren();
+    if (!items.length) { list.append(el('div', { class: 'cmd-empty muted small', text: t('cmd.empty') })); return; }
+    items.forEach((c, i) => list.append(el('div', {
+      class: 'cmd-item' + (i === sel ? ' sel' : ''),
+      onclick: () => choose(i),
+      onmousemove: () => { if (sel !== i) { sel = i; paint(); } },
+    }, el('span', { text: c.label }))));
+  }
+  // light repaint of just the selected state (avoids rebuilding on hover)
+  function paint() {
+    [...list.children].forEach((row, i) => row.classList.toggle('sel', i === sel));
+  }
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    items = q ? cmds.filter((c) => c.label.toLowerCase().includes(q)) : cmds;
+    sel = 0; render();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(sel); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  });
+  document.body.append(overlay);
+  render();
+  input.focus();
+}
+
 // ============================================================ boot
 
 wireNative();
 renderWelcome();
 pushPresence(); // start in the menu state (no op in the browser)
+
+// Ctrl/Cmd+K opens the command palette (a combo nothing else uses). Registered
+// once here, never inside renderEditor, so it is not duplicated on re-render.
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    const open = document.querySelector('.cmd-overlay');
+    if (open) open.remove(); else showCommandPalette();
+  }
+});
 
 // ============================================================ modal prompt (Electron has no window.prompt)
 
